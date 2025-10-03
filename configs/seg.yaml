@@ -1,0 +1,32 @@
+seed: 42
+save_dir: experiments
+
+
+# Daten
+data:
+root: src/data/bdd
+split_train: day/train
+split_val: day/val
+num_classes: 19
+
+
+# Training
+train:
+batch_size: 6
+epochs: 100
+lr: 2.0e-4
+optimizer: adam
+weight_decay: 0.0
+
+
+# Architektur
+model:
+backbone: resnet34
+in_channels: 3
+features: [64, 128, 256, 512]
+use_skip: true
+
+
+# Augmentation konsistent zum Paper
+transform:
+paper_mode: true # crop 512 -> resize 256

@@ -16,3 +16,5 @@ matplotlib==3.9.2
 einops==0.8.0
 albumentations==1.4.14
 scipy==1.13.1
+
+cityscapesscripts

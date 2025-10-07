@@ -1,45 +1,47 @@
-experiment: cityscapes_unet_resnet_paper
-dataset:
-  name: cityscapes
-  root: data/cityscapes         # <-- passe deinen Pfad an
-  split_ratio: [2975, 500]
-  classes: 19
+exp_name: "seg_cityscapes_1k"
+
+data:
+  root: "data/cityscapes"
+  train_images: "data/cityscapes/leftImg8bit/train"
+  train_masks:  "data/cityscapes/gtFine/train"
+  val_images:   "data/cityscapes/leftImg8bit/val"
+  val_masks:    "data/cityscapes/gtFine/val"
+  num_classes: 19
   ignore_index: 255
+  sample_n_train: 1000
 
-training:
-  # Iterationsbasiert (wie im Paper), nicht epoch-basiert
-  total_iterations: 80000
-  val_every_iterations: 2000
-  batch_size: 8                 # im Paper 8 gesamt (z.B. 4 GPUs x 2)
-  amp: false                    # Paper nutzte klassisch FP32
-  optimizer: sgd
-  lr: 2.5e-4
-  momentum: 0.9
-  weight_decay: 1.0e-4
-  lr_policy: poly               # lr * (1 - iter/max_iter)^power
-  lr_poly_power: 0.9
-  grad_clip: null
+train:
+  epochs: 200
+  batch_size: 8
+  seed: 42
+  workers: 4
 
-image:
-  # Paper: alles auf 512x256, Random Crop + Flip
-  resize: [512, 256]
-  crop: [512, 256]              # RandomCrop
-  scale_jitter: null            # kein Multi-Scale Jitter
-  horizontal_flip_p: 0.5
-  color_jitter: null
-  normalize_imagenet: true      # für ResNet-Encoder
+optim:
+  name: adam
+  lr: 0.0002
+  betas: [0.5, 0.999]
+  weight_decay: 0.0
+
+scheduler:
+  policy: linear_decay_after_warm
+  warm_epochs: 100      # keep LR constant for first 100 epochs
+  decay_epochs: 100     # then linearly decay to 0 over next 100
+  min_lr: 0.0
 
 model:
-  backbone: resnet101           # Paper: ResNet-101 (ImageNet vortrainiert)
-  pretrained: imagenet
-  decoder: unet                 # S = SE ∘ SD (UNet-artig)
-  out_channels: 19
-  aux_head: false
+  base_channels: 64
+  n_resblocks: 9
 
-checkpointing:
-  save_top_k: 3
-  keep_last: true
-  every_n_val: 1
+transforms:
+  crop: 512
+  resize: 256
+  hflip: true
 
 logging:
-  interval_iters: 50
+  save_every: 5
+  val_every: 1
+  out_dir: "experiments"
+  results_dir: "results"
+
+artifacts:
+  encoder_weights: "encoder_GE.pth"

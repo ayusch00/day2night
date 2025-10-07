@@ -1,0 +1,8 @@
+Lossfunktion des Segemntierungschritt:
+ - ➡️ Bewertung:
+    Die Kombination ist solide und basiert direkt auf dem CycleGAN-Standard (2017).
+    Aber nicht der aktuelle Stand der Technik:
+
+    WGAN-GP (Wasserstein + Gradient Penalty) oder LSGAN (Least Squares) verbessern Stabilität.
+
+    Neuere Varianten wie PatchGAN mit feature matching loss oder perceptual loss (VGG-based) liefern realistischere Texturen.

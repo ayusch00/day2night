@@ -1,6 +1,8 @@
 /.venv
 /data
 /results
+/cityscapes_1k
+
 
 # Byte-compiled Python files
 __pycache__/

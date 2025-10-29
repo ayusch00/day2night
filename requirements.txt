@@ -18,3 +18,4 @@ albumentations==1.4.14
 scipy==1.13.1
 
 cityscapesscripts
+tqdm

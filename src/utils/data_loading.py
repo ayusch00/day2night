@@ -25,3 +25,5 @@ class SegDataset(Dataset):
         mask = Image.open(mask_path)
         mask = torch.from_numpy(np.array(self.mask_t(mask), dtype=np.int64))
         return img, mask
+    def __len__(self):
+        return len(self.imgs)

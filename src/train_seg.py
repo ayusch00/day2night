@@ -1,6 +1,7 @@
 # src/train_seg_min.py
 import torch, torch.nn as nn, random
 from torch.utils.data import DataLoader, Subset
+from tqdm.auto import tqdm
 from src.utils.common import load_cfg, set_seed
 from src.utils.transforms import make_transforms
 from src.utils.data_loading import SegDataset
@@ -33,12 +34,16 @@ def main(cfg_path="configs/seg.yaml"):
         shuffle=True, num_workers=cfg["train"]["workers"], pin_memory=True
     )
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA device required for segmentation training but none was found.")
+    device = "cuda"
     model = SegNet9ResUNet(
         num_classes=cfg["data"]["num_classes"],
         base=cfg["model"]["base_channels"],
         n_res=cfg["model"]["n_resblocks"],
     ).to(device)
+    if torch.cuda.device_count() > 1:
+        model = nn.DataParallel(model)
 
     opt = torch.optim.Adam(
         model.parameters(),
@@ -49,15 +54,23 @@ def main(cfg_path="configs/seg.yaml"):
 
     for ep in range(1, cfg["train"]["epochs"] + 1):
         model.train(); total = 0.0
-        for x, y in train_dl:
+        pbar = tqdm(
+            train_dl,
+            desc=f"Epoch {ep}/{cfg['train']['epochs']}",
+            leave=False,
+            dynamic_ncols=True,
+        )
+        for x, y in pbar:
             x, y = x.to(device), y.to(device)
             opt.zero_grad(); loss = crit(model(x), y)
             loss.backward(); opt.step()
             total += loss.item() * x.size(0)
+            pbar.set_postfix(loss=loss.item())
         print(f"[{ep}/{cfg['train']['epochs']}] loss={total/len(train_ds):.4f}")
 
     out = f"experiments/{cfg['exp_name']}_encoder_GE.pth"
-    torch.save(model.encoder.state_dict(), out)
+    encoder = model.module.encoder if isinstance(model, nn.DataParallel) else model.encoder
+    torch.save(encoder.state_dict(), out)
     print(f"Saved encoder to {out}")
 
 if __name__ == "__main__":

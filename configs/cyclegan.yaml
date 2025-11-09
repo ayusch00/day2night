@@ -1,0 +1,51 @@
+exp_name: cyclegan_day2night
+
+data:
+  day_dir: data/day
+  night_dir: data/night
+  extensions: ["jpg", "jpeg", "png"]
+  sample_limit: null
+
+transforms:
+  resize: 256
+  random_crop: null
+  random_flip: true
+
+model:
+  generator:
+    in_channels: 3
+    out_channels: 3
+    base_channels: 64
+    n_res_blocks: 9
+    use_skip: true
+    encoder_checkpoint: experiments/seg_cityscapes_1k_encoder_GE.pth
+    freeze_encoder: true
+  discriminator:
+    in_channels: 3
+    base_channels: 64
+    n_layers: 3
+    max_channels: 512
+
+loss:
+  lambda_cycle: 10.0
+  lambda_identity: 5.0
+
+optim:
+  generator:
+    lr: 2.0e-4
+    betas: [0.5, 0.999]
+  discriminator:
+    lr: 2.0e-4
+    betas: [0.5, 0.999]
+
+train:
+  epochs: 100
+  batch_size: 1
+  workers: 4
+  seed: 42
+
+logging:
+  out_dir: experiments
+  results_dir: results
+  save_every: 10
+  log_interval: 100

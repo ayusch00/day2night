@@ -1,6 +1,7 @@
 import glob
 import os
 from dataclasses import dataclass
+from itertools import chain
 from typing import Sequence
 
 import torch
@@ -92,6 +93,16 @@ class LossMeters:
         return {k: getattr(self, k) / samples for k in ["g_total", "g_adv", "g_cycle", "g_id", "d_total"]}
 
 
+def set_linear_lr(optimizer, base_lr, epoch, decay_start, total_epochs):
+    if total_epochs <= decay_start or epoch <= decay_start:
+        factor = 1.0
+    else:
+        decay_epochs = max(1, total_epochs - decay_start)
+        factor = max(0.0, 1.0 - (epoch - decay_start) / decay_epochs)
+    for group in optimizer.param_groups:
+        group["lr"] = base_lr * factor
+
+
 def train(cfg_path: str = "configs/cyclegan.yaml"):
     cfg = load_cfg(cfg_path)
     set_seed(cfg["train"].get("seed", 42))
@@ -177,14 +188,18 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
     l1_loss = nn.L1Loss()
 
     optim_cfg = cfg["optim"]
+    gen_lr = optim_cfg["generator"]["lr"]
+    disc_lr = optim_cfg["discriminator"]["lr"]
+    gen_params = [p for p in chain(G.parameters(), F.parameters()) if p.requires_grad]
+    disc_params = [p for p in chain(D_day.parameters(), D_night.parameters()) if p.requires_grad]
     opt_G = torch.optim.Adam(
-        list(G.parameters()) + list(F.parameters()),
-        lr=optim_cfg["generator"]["lr"],
+        gen_params,
+        lr=gen_lr,
         betas=tuple(optim_cfg["generator"].get("betas", [0.5, 0.999])),
     )
     opt_D = torch.optim.Adam(
-        list(D_day.parameters()) + list(D_night.parameters()),
-        lr=optim_cfg["discriminator"]["lr"],
+        disc_params,
+        lr=disc_lr,
         betas=tuple(optim_cfg["discriminator"].get("betas", [0.5, 0.999])),
     )
 
@@ -192,6 +207,7 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
     lambda_id = cfg["loss"].get("lambda_identity", 5.0)
 
     epochs = cfg["train"]["epochs"]
+    decay_start = cfg["train"].get("lr_decay_start", epochs // 2)
     steps_per_epoch = max(len(day_loader), len(night_loader))
     save_every = cfg["logging"].get("save_every", 10)
     log_every = cfg["logging"].get("log_interval", 50)
@@ -199,6 +215,8 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
     exp_dir, _ = make_run_dirs(cfg)
 
     for epoch in range(1, epochs + 1):
+        set_linear_lr(opt_G, gen_lr, epoch, decay_start, epochs)
+        set_linear_lr(opt_D, disc_lr, epoch, decay_start, epochs)
         G.train()
         F.train()
         D_day.train()

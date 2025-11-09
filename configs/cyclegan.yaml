@@ -40,10 +40,11 @@ optim:
     betas: [0.5, 0.999]
 
 train:
-  epochs: 100
+  epochs: 200
   batch_size: 1
   workers: 4
   seed: 42
+  lr_decay_start: 100
 
 logging:
   out_dir: experiments

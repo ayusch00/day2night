@@ -214,6 +214,14 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
 
     exp_dir, _ = make_run_dirs(cfg)
 
+    # Persist the resolved training image lists for each domain.
+    for domain, dataset in (("day", day_ds), ("night", night_ds)):
+        filelist_path = os.path.join(exp_dir, f"{domain}_files.txt")
+        with open(filelist_path, "w") as fh:
+            for path in dataset.paths:
+                fh.write(f"{path}\n")
+        print(f"Saved list of {len(dataset.paths)} {domain} images to {filelist_path}")
+
     for epoch in range(1, epochs + 1):
         set_linear_lr(opt_G, gen_lr, epoch, decay_start, epochs)
         set_linear_lr(opt_D, disc_lr, epoch, decay_start, epochs)

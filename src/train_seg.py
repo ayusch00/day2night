@@ -1,5 +1,5 @@
 # src/train_seg_min.py
-import torch, torch.nn as nn, random
+import os, torch, torch.nn as nn, random
 from torch.utils.data import DataLoader, Subset
 from tqdm.auto import tqdm
 from src.utils.common import load_cfg, set_seed
@@ -28,6 +28,20 @@ def main(cfg_path="configs/seg.yaml"):
         idx = list(range(len(train_ds)))
         random.Random(cfg["train"]["seed"]).shuffle(idx)
         train_ds = Subset(train_ds, idx[:n])
+
+    # Persist the exact list of images that participate in training for reproducibility.
+    if isinstance(train_ds, Subset):
+        base_imgs = train_ds.dataset.imgs
+        selected_imgs = [base_imgs[i] for i in train_ds.indices]
+    else:
+        selected_imgs = train_ds.imgs
+    out_dir = os.path.join(cfg.get("logging", {}).get("out_dir", "experiments"), cfg["exp_name"])
+    os.makedirs(out_dir, exist_ok=True)
+    filelist_path = os.path.join(out_dir, "train_files.txt")
+    with open(filelist_path, "w") as fh:
+        for path in selected_imgs:
+            fh.write(f"{path}\n")
+    print(f"Saved list of {len(selected_imgs)} training images to {filelist_path}")
 
     train_dl = DataLoader(
         train_ds, batch_size=cfg["train"]["batch_size"],

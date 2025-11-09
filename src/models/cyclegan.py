@@ -7,6 +7,35 @@ from torch import nn
 from src.models.seg_unet_resnet import Encoder9Res
 
 
+def init_decoder_weights(module: nn.Module) -> None:
+    if isinstance(module, (nn.Conv2d, nn.ConvTranspose2d)):
+        nn.init.xavier_normal_(module.weight)
+        if module.bias is not None:
+            nn.init.zeros_(module.bias)
+    elif isinstance(module, nn.InstanceNorm2d):
+        if module.weight is not None:
+            nn.init.ones_(module.weight)
+        if module.bias is not None:
+            nn.init.zeros_(module.bias)
+
+
+class ResBlock(nn.Module):
+    def __init__(self, channels: int):
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.ReflectionPad2d(1),
+            nn.Conv2d(channels, channels, kernel_size=3, stride=1, padding=0, bias=False),
+            nn.InstanceNorm2d(channels, affine=False, track_running_stats=False),
+            nn.ReLU(inplace=True),
+            nn.ReflectionPad2d(1),
+            nn.Conv2d(channels, channels, kernel_size=3, stride=1, padding=0, bias=False),
+            nn.InstanceNorm2d(channels, affine=False, track_running_stats=False),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x + self.block(x)
+
+
 def upsample_block(in_c: int, out_c: int) -> nn.Sequential:
     return nn.Sequential(
         nn.Upsample(scale_factor=2, mode="nearest"),
@@ -17,9 +46,20 @@ def upsample_block(in_c: int, out_c: int) -> nn.Sequential:
 
 
 class GeneratorDecoder(nn.Module):
-    def __init__(self, base: int = 64, out_channels: int = 3, use_skip: bool = True):
+    def __init__(
+        self,
+        base: int = 64,
+        out_channels: int = 3,
+        use_skip: bool = True,
+        n_res_blocks: int = 3,
+    ):
         super().__init__()
         self.use_skip = use_skip
+        self.res_blocks = (
+            nn.Sequential(*[ResBlock(base * 4) for _ in range(n_res_blocks)])
+            if n_res_blocks > 0
+            else nn.Identity()
+        )
         self.up1 = upsample_block(base * 4, base * 2)
         self.up2 = upsample_block(base * 2, base)
 
@@ -56,6 +96,7 @@ class GeneratorDecoder(nn.Module):
         else:
             e2 = e1 = None
 
+        bottleneck = self.res_blocks(bottleneck)
         x = self.up1(bottleneck)
         if self.use_skip:
             x = self.fuse1(torch.cat([x, e2], dim=1))
@@ -85,11 +126,18 @@ class CycleGANGenerator(nn.Module):
         use_skip: bool = True,
         encoder_checkpoint: Optional[str] = None,
         freeze_encoder: bool = False,
+        decoder_res_blocks: int = 3,
     ):
         super().__init__()
         self.use_skip = use_skip
         self.encoder = Encoder9Res(in_c=in_channels, base=base_channels, n_res=n_res_blocks)
-        self.decoder = GeneratorDecoder(base=base_channels, out_channels=out_channels, use_skip=use_skip)
+        self.decoder = GeneratorDecoder(
+            base=base_channels,
+            out_channels=out_channels,
+            use_skip=use_skip,
+            n_res_blocks=decoder_res_blocks,
+        )
+        self.decoder.apply(init_decoder_weights)
 
         if encoder_checkpoint:
             self.load_encoder_weights(encoder_checkpoint)

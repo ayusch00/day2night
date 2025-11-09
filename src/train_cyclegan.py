@@ -129,6 +129,7 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
 
     encoder_ckpt = gen_cfg.get("encoder_checkpoint")
     freeze_encoder = gen_cfg.get("freeze_encoder", False)
+    decoder_res_blocks = gen_cfg.get("decoder_res_blocks", 3)
 
     G = CycleGANGenerator(
         in_channels=gen_cfg.get("in_channels", 3),
@@ -138,6 +139,7 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
         use_skip=gen_cfg.get("use_skip", True),
         encoder_checkpoint=encoder_ckpt,
         freeze_encoder=freeze_encoder,
+        decoder_res_blocks=decoder_res_blocks,
     ).to(device)
 
     F = CycleGANGenerator(
@@ -148,6 +150,7 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
         use_skip=gen_cfg.get("use_skip", True),
         encoder_checkpoint=encoder_ckpt,
         freeze_encoder=freeze_encoder,
+        decoder_res_blocks=decoder_res_blocks,
     ).to(device)
 
     D_day = PatchDiscriminator(

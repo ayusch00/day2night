@@ -1,5 +1,6 @@
 import glob
 import os
+import random
 from dataclasses import dataclass
 from itertools import chain
 from typing import Sequence
@@ -55,7 +56,10 @@ class ImageFolderDataset(Dataset):
         if not paths:
             raise RuntimeError(f"No images found in {root}.")
         if sample_limit:
-            paths = paths[:sample_limit]
+            if len(paths) > sample_limit:
+                paths = random.sample(paths, sample_limit)
+            else:
+                paths = paths[:sample_limit]
         self.paths = paths
 
     def __len__(self) -> int:

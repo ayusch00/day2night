@@ -6,8 +6,11 @@ from itertools import chain
 from typing import Sequence
 
 import torch
+import torch.distributed as dist
 from torch import nn
-from torch.utils.data import DataLoader, Dataset
+from torch.cuda.amp import GradScaler, autocast
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data import DataLoader, Dataset, DistributedSampler
 from torchvision import transforms
 from PIL import Image
 from tqdm.auto import tqdm
@@ -97,6 +100,45 @@ class LossMeters:
         return {k: getattr(self, k) / samples for k in ["g_total", "g_adv", "g_cycle", "g_id", "d_total"]}
 
 
+def distributed_world_size() -> int:
+    return int(os.environ.get("WORLD_SIZE", "1"))
+
+
+def init_distributed_if_needed() -> tuple[bool, int]:
+    distributed = distributed_world_size() > 1
+    local_rank = 0
+    if distributed:
+        if not dist.is_initialized():
+            dist.init_process_group(backend="nccl")
+        local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        torch.cuda.set_device(local_rank)
+    return distributed, local_rank
+
+
+def cleanup_distributed():
+    if dist.is_available() and dist.is_initialized():
+        dist.barrier()
+        dist.destroy_process_group()
+
+
+def broadcast_dirs(exp_dir: str | None, results_dir: str | None) -> tuple[str, str]:
+    payload = [exp_dir, results_dir]
+    dist.broadcast_object_list(payload, src=0)
+    return payload[0], payload[1]
+
+
+def sync_meter_totals(meters: LossMeters, samples: int, device: torch.device, distributed: bool) -> tuple[dict[str, float], int]:
+    keys = ["g_total", "g_adv", "g_cycle", "g_id", "d_total"]
+    totals = torch.tensor([getattr(meters, k) for k in keys], device=device)
+    sample_tensor = torch.tensor([samples], device=device)
+    if distributed:
+        dist.all_reduce(totals, op=dist.ReduceOp.SUM)
+        dist.all_reduce(sample_tensor, op=dist.ReduceOp.SUM)
+    total_samples = int(sample_tensor.item())
+    avg = {k: totals[i].item() / max(total_samples, 1) for i, k in enumerate(keys)}
+    return avg, total_samples
+
+
 def set_linear_lr(optimizer, base_lr, epoch, decay_start, total_epochs):
     if total_epochs <= decay_start or epoch <= decay_start:
         factor = 1.0
@@ -109,9 +151,16 @@ def set_linear_lr(optimizer, base_lr, epoch, decay_start, total_epochs):
 
 def train(cfg_path: str = "configs/cyclegan.yaml"):
     cfg = load_cfg(cfg_path)
-    set_seed(cfg["train"].get("seed", 42))
+    distributed, local_rank = init_distributed_if_needed()
+    rank = dist.get_rank() if distributed else 0
+    is_main = rank == 0
+    seed = cfg["train"].get("seed", 42) + rank
+    set_seed(seed)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if distributed and not torch.cuda.is_available():
+        raise RuntimeError("Distributed training requires CUDA devices.")
+    device = torch.device("cuda", local_rank) if distributed else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    use_amp = cfg["train"].get("amp", True) and device.type == "cuda"
 
     img_t = build_transform(cfg["transforms"])
     data_cfg = cfg["data"]
@@ -129,15 +178,22 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
         sample_limit=data_cfg.get("sample_limit"),
     )
 
+    if distributed:
+        day_sampler = DistributedSampler(day_ds, shuffle=True, drop_last=True)
+        night_sampler = DistributedSampler(night_ds, shuffle=True, drop_last=True)
+    else:
+        day_sampler = night_sampler = None
+
     dl_kwargs = dict(
         batch_size=cfg["train"]["batch_size"],
         num_workers=cfg["train"].get("workers", 4),
-        shuffle=True,
+        shuffle=not distributed,
         pin_memory=torch.cuda.is_available(),
         drop_last=True,
+        persistent_workers=cfg["train"].get("workers", 4) > 0,
     )
-    day_loader = DataLoader(day_ds, **dl_kwargs)
-    night_loader = DataLoader(night_ds, **dl_kwargs)
+    day_loader = DataLoader(day_ds, sampler=day_sampler, **dl_kwargs)
+    night_loader = DataLoader(night_ds, sampler=night_sampler, **dl_kwargs)
 
     gen_cfg = cfg["model"]["generator"]
     disc_cfg = cfg["model"]["discriminator"]
@@ -182,7 +238,13 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
         max_channels=disc_cfg.get("max_channels", 512),
     ).to(device)
 
-    if torch.cuda.device_count() > 1:
+    if distributed:
+        ddp_kwargs = dict(device_ids=[device.index], output_device=device.index, find_unused_parameters=True)
+        G = DDP(G, **ddp_kwargs)
+        F = DDP(F, **ddp_kwargs)
+        D_day = DDP(D_day, **ddp_kwargs)
+        D_night = DDP(D_night, **ddp_kwargs)
+    elif torch.cuda.device_count() > 1:
         G = nn.DataParallel(G)
         F = nn.DataParallel(F)
         D_day = nn.DataParallel(D_day)
@@ -216,19 +278,33 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
     save_every = cfg["logging"].get("save_every", 10)
     log_every = cfg["logging"].get("log_interval", 50)
 
-    exp_dir, _ = make_run_dirs(cfg)
+    if distributed:
+        if is_main:
+            exp_dir, results_dir = make_run_dirs(cfg)
+        else:
+            exp_dir = results_dir = None
+        exp_dir, results_dir = broadcast_dirs(exp_dir, results_dir)
+    else:
+        exp_dir, results_dir = make_run_dirs(cfg)
 
-    # Persist the resolved training image lists for each domain.
-    for domain, dataset in (("day", day_ds), ("night", night_ds)):
-        filelist_path = os.path.join(exp_dir, f"{domain}_files.txt")
-        with open(filelist_path, "w") as fh:
-            for path in dataset.paths:
-                fh.write(f"{path}\n")
-        print(f"Saved list of {len(dataset.paths)} {domain} images to {filelist_path}")
+    scaler_G = GradScaler(enabled=use_amp)
+    scaler_D = GradScaler(enabled=use_amp)
+
+    if is_main:
+        for domain, dataset in (("day", day_ds), ("night", night_ds)):
+            filelist_path = os.path.join(exp_dir, f"{domain}_files.txt")
+            with open(filelist_path, "w") as fh:
+                for path in dataset.paths:
+                    fh.write(f"{path}\n")
+            print(f"Saved list of {len(dataset.paths)} {domain} images to {filelist_path}")
 
     for epoch in range(1, epochs + 1):
         set_linear_lr(opt_G, gen_lr, epoch, decay_start, epochs)
         set_linear_lr(opt_D, disc_lr, epoch, decay_start, epochs)
+        if day_sampler:
+            day_sampler.set_epoch(epoch)
+        if night_sampler:
+            night_sampler.set_epoch(epoch)
         G.train()
         F.train()
         D_day.train()
@@ -239,9 +315,11 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
 
         meters = LossMeters()
         samples = 0
+        iterator = range(steps_per_epoch)
+        if is_main:
+            iterator = tqdm(iterator, desc=f"Epoch {epoch}/{epochs}", leave=False, dynamic_ncols=True)
 
-        pbar = tqdm(range(steps_per_epoch), desc=f"Epoch {epoch}/{epochs}", leave=False, dynamic_ncols=True)
-        for step in pbar:
+        for step in iterator:
             day_batch, day_iter = next_batch(day_iter, day_loader)
             night_batch, night_iter = next_batch(night_iter, night_loader)
 
@@ -253,38 +331,42 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
             # --- Train discriminators ---
             opt_D.zero_grad(set_to_none=True)
 
-            fake_night = G(day).detach()
-            fake_day = F(night).detach()
+            with autocast(enabled=use_amp):
+                fake_night = G(day).detach()
+                fake_day = F(night).detach()
 
-            loss_d_night = 0.5 * (
-                gan_loss(D_night(night), True) + gan_loss(D_night(fake_night), False)
-            )
-            loss_d_day = 0.5 * (
-                gan_loss(D_day(day), True) + gan_loss(D_day(fake_day), False)
-            )
-            loss_d = loss_d_day + loss_d_night
-            loss_d.backward()
-            opt_D.step()
+                loss_d_night = 0.5 * (
+                    gan_loss(D_night(night), True) + gan_loss(D_night(fake_night), False)
+                )
+                loss_d_day = 0.5 * (
+                    gan_loss(D_day(day), True) + gan_loss(D_day(fake_day), False)
+                )
+                loss_d = loss_d_day + loss_d_night
+            scaler_D.scale(loss_d).backward()
+            scaler_D.step(opt_D)
+            scaler_D.update()
 
             # --- Train generators ---
             opt_G.zero_grad(set_to_none=True)
 
-            fake_night = G(day)
-            fake_day = F(night)
+            with autocast(enabled=use_amp):
+                fake_night = G(day)
+                fake_day = F(night)
 
-            adv_loss = gan_loss(D_night(fake_night), True) + gan_loss(D_day(fake_day), True)
+                adv_loss = gan_loss(D_night(fake_night), True) + gan_loss(D_day(fake_day), True)
 
-            rec_day = F(fake_night)
-            rec_night = G(fake_day)
-            cycle_loss = l1_loss(rec_day, day) + l1_loss(rec_night, night)
+                rec_day = F(fake_night)
+                rec_night = G(fake_day)
+                cycle_loss = l1_loss(rec_day, day) + l1_loss(rec_night, night)
 
-            id_day = F(day)
-            id_night = G(night)
-            id_loss = l1_loss(id_day, day) + l1_loss(id_night, night)
+                id_day = F(day)
+                id_night = G(night)
+                id_loss = l1_loss(id_day, day) + l1_loss(id_night, night)
 
-            total_g = adv_loss + lambda_cycle * cycle_loss + lambda_id * id_loss
-            total_g.backward()
-            opt_G.step()
+                total_g = adv_loss + lambda_cycle * cycle_loss + lambda_id * id_loss
+            scaler_G.scale(total_g).backward()
+            scaler_G.step(opt_G)
+            scaler_G.update()
 
             batch_losses = {
                 "g_total": total_g.item(),
@@ -295,29 +377,35 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
             }
             meters.update(batch_losses, bsz)
 
-            if (step + 1) % log_every == 0:
-                avg = meters.average(samples)
-                pbar.set_postfix({k: f"{v:.4f}" for k, v in avg.items()})
+            if is_main and (step + 1) % log_every == 0 and hasattr(iterator, "set_postfix"):
+                avg_local = meters.average(samples)
+                iterator.set_postfix({k: f"{v:.4f}" for k, v in avg_local.items()})
 
-        avg = meters.average(samples)
-        print(
-            f"[{epoch}/{epochs}] "
-            f"D={avg['d_total']:.4f} G={avg['g_total']:.4f} "
-            f"(adv={avg['g_adv']:.4f}, cycle={avg['g_cycle']:.4f}, id={avg['g_id']:.4f})"
-        )
+        avg_all, _ = sync_meter_totals(meters, samples, device, distributed)
+        if is_main:
+            print(
+                f"[{epoch}/{epochs}] "
+                f"D={avg_all['d_total']:.4f} G={avg_all['g_total']:.4f} "
+                f"(adv={avg_all['g_adv']:.4f}, cycle={avg_all['g_cycle']:.4f}, id={avg_all['g_id']:.4f})"
+            )
 
-        if epoch % save_every == 0 or epoch == epochs:
-            state = {
-                "epoch": epoch,
-                "G": G.state_dict(),
-                "F": F.state_dict(),
-                "D_day": D_day.state_dict(),
-                "D_night": D_night.state_dict(),
-                "opt_G": opt_G.state_dict(),
-                "opt_D": opt_D.state_dict(),
-                "cfg": cfg,
-            }
-            torch.save(state, os.path.join(exp_dir, f"epoch_{epoch:04d}.pt"))
+            if epoch % save_every == 0 or epoch == epochs:
+                state = {
+                    "epoch": epoch,
+                    "G": (G.module if isinstance(G, (nn.DataParallel, DDP)) else G).state_dict(),
+                    "F": (F.module if isinstance(F, (nn.DataParallel, DDP)) else F).state_dict(),
+                    "D_day": (D_day.module if isinstance(D_day, (nn.DataParallel, DDP)) else D_day).state_dict(),
+                    "D_night": (
+                        D_night.module if isinstance(D_night, (nn.DataParallel, DDP)) else D_night
+                    ).state_dict(),
+                    "opt_G": opt_G.state_dict(),
+                    "opt_D": opt_D.state_dict(),
+                    "cfg": cfg,
+                }
+                torch.save(state, os.path.join(exp_dir, f"epoch_{epoch:04d}.pt"))
+
+    if distributed:
+        cleanup_distributed()
 
 
 if __name__ == "__main__":

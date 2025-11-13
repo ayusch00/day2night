@@ -2,6 +2,8 @@
 /data
 /results
 /cityscapes_1k
+/experiments
+
 
 
 # Byte-compiled Python files

@@ -30,7 +30,7 @@ model:
 
 loss:
   lambda_cycle: 10.0
-  lambda_identity: 5.0
+  lambda_identity: 3.0
 
 optim:
   generator:

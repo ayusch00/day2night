@@ -149,6 +149,33 @@ def set_linear_lr(optimizer, base_lr, epoch, decay_start, total_epochs):
         group["lr"] = base_lr * factor
 
 
+class ImagePool:
+    """Stores previously generated images to stabilize discriminator training."""
+
+    def __init__(self, size: int):
+        self.size = max(0, size)
+        self.buffer: list[torch.Tensor] = []
+
+    def query(self, images: torch.Tensor) -> torch.Tensor:
+        if self.size == 0:
+            return images
+        out: list[torch.Tensor] = []
+        for img in images:
+            img = img.unsqueeze(0).detach()
+            if len(self.buffer) < self.size:
+                self.buffer.append(img.clone())
+                out.append(img)
+            else:
+                if random.random() < 0.5:
+                    idx = random.randrange(self.size)
+                    cached = self.buffer[idx].clone()
+                    self.buffer[idx] = img.clone()
+                    out.append(cached)
+                else:
+                    out.append(img)
+        return torch.cat(out, dim=0)
+
+
 def train(cfg_path: str = "configs/cyclegan.yaml"):
     cfg = load_cfg(cfg_path)
     distributed, local_rank = init_distributed_if_needed()
@@ -229,6 +256,7 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
         base_channels=disc_cfg.get("base_channels", 64),
         n_layers=disc_cfg.get("n_layers", 3),
         max_channels=disc_cfg.get("max_channels", 512),
+        use_spectral_norm=disc_cfg.get("use_spectral_norm", False),
     ).to(device)
 
     D_night = PatchDiscriminator(
@@ -236,6 +264,7 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
         base_channels=disc_cfg.get("base_channels", 64),
         n_layers=disc_cfg.get("n_layers", 3),
         max_channels=disc_cfg.get("max_channels", 512),
+        use_spectral_norm=disc_cfg.get("use_spectral_norm", False),
     ).to(device)
 
     if distributed:
@@ -289,6 +318,9 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
 
     scaler_G = GradScaler(enabled=use_amp)
     scaler_D = GradScaler(enabled=use_amp)
+    pool_size = cfg["train"].get("image_pool_size", 50)
+    fake_day_pool = ImagePool(pool_size)
+    fake_night_pool = ImagePool(pool_size)
 
     if is_main:
         for domain, dataset in (("day", day_ds), ("night", night_ds)):
@@ -334,12 +366,14 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
             with autocast(enabled=use_amp):
                 fake_night = G(day).detach()
                 fake_day = F(night).detach()
+                fake_night_buf = fake_night_pool.query(fake_night)
+                fake_day_buf = fake_day_pool.query(fake_day)
 
                 loss_d_night = 0.5 * (
-                    gan_loss(D_night(night), True) + gan_loss(D_night(fake_night), False)
+                    gan_loss(D_night(night), True) + gan_loss(D_night(fake_night_buf), False)
                 )
                 loss_d_day = 0.5 * (
-                    gan_loss(D_day(day), True) + gan_loss(D_day(fake_day), False)
+                    gan_loss(D_day(day), True) + gan_loss(D_day(fake_day_buf), False)
                 )
                 loss_d = loss_d_day + loss_d_night
             scaler_D.scale(loss_d).backward()

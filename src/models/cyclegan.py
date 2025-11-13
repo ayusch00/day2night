@@ -3,6 +3,7 @@ from typing import Optional
 
 import torch
 from torch import nn
+from torch.nn.utils import spectral_norm
 
 from src.models.seg_unet_resnet import Encoder9Res
 
@@ -174,11 +175,16 @@ class PatchDiscriminator(nn.Module):
         base_channels: int = 64,
         n_layers: int = 3,
         max_channels: int = 512,
+        use_spectral_norm: bool = False,
     ):
         super().__init__()
+        def conv_layer(*args, **kwargs):
+            layer = nn.Conv2d(*args, **kwargs)
+            return spectral_norm(layer) if use_spectral_norm else layer
+
         layers = [
             nn.Sequential(
-                nn.Conv2d(in_channels, base_channels, kernel_size=4, stride=2, padding=1),
+                conv_layer(in_channels, base_channels, kernel_size=4, stride=2, padding=1),
                 nn.LeakyReLU(0.2, inplace=True),
             )
         ]
@@ -189,14 +195,14 @@ class PatchDiscriminator(nn.Module):
             stride = 1 if i == n_layers - 1 else 2
             layers.append(
                 nn.Sequential(
-                    nn.Conv2d(in_c, out_c, kernel_size=4, stride=stride, padding=1, bias=False),
+                    conv_layer(in_c, out_c, kernel_size=4, stride=stride, padding=1, bias=False),
                     nn.InstanceNorm2d(out_c, affine=False, track_running_stats=False),
                     nn.LeakyReLU(0.2, inplace=True),
                 )
             )
             in_c = out_c
 
-        layers.append(nn.Conv2d(in_c, 1, kernel_size=4, stride=1, padding=1))
+        layers.append(conv_layer(in_c, 1, kernel_size=4, stride=1, padding=1))
         self.model = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

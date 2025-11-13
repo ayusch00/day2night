@@ -26,6 +26,8 @@ pip install -r requirements.txt
 
 Checkpoints werden unter `experiments/` abgelegt (inkl. Generatoren G/F und Discriminatoren Ds/Dt).
 
+- **Stabilitäts-Tuning:** Standardmäßig läuft TTUR (G = 2e‑4, D = 1e‑4), die Discriminatoren können optional per SpectralNorm verstärkt werden (`model.discriminator.use_spectral_norm`) und ein Replay-Buffer (`train.image_pool_size`, default 50) glättet das D-Training.
+
 ### Segmentierungs‑Pretraining (Encoder)
 
 Die CycleGAN‑Generatoren nutzen einen Encoder, der zuvor auf Cityscapes segmentiert wurde. Trainiert ihn mit:

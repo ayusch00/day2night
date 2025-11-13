@@ -1,4 +1,4 @@
-exp_name: "seg""
+exp_name: "seg"
 
 data:
   root: "data/bdd_split"

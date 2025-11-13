@@ -1,11 +1,17 @@
-exp_name: "seg_cityscapes_1k"
+exp_name: "seg""
 
 data:
-  root: "data/cityscapes"
-  train_images: "data/cityscapes/leftImg8bit/train"
-  train_masks:  "data/cityscapes/gtFine/train"
-  val_images:   "data/cityscapes/leftImg8bit/val"
-  val_masks:    "data/cityscapes/gtFine/val"
+  root: "data/bdd_split"
+  dataset: "bdd100k"  # use "cityscapes" for default mapping logic
+  extensions: ["jpg", "jpeg", "png"]
+  train_images: "data/bdd_split/segnet/trainA"
+  train_masks:  "data/bdd_split/segnet/trainA_mask"
+  val_images:   "data/bdd_split/segnet/valA"
+  val_masks:    "data/bdd_split/segnet/valA_mask"
+  #train_images: "data/cityscapes/leftImg8bit/train"
+  #train_masks:  "data/cityscapes/gtFine/train"
+  #val_images:   "data/cityscapes/leftImg8bit/val"
+  #val_masks:    "data/cityscapes/gtFine/val"
   num_classes: 19
   ignore_index: 255
   sample_n_train: 1000

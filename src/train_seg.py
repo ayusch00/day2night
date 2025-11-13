@@ -61,13 +61,19 @@ def main(cfg_path="configs/seg.yaml"):
         hflip=cfg["transforms"].get("hflip", True),
     )
 
+    data_cfg = cfg["data"]
+    dataset_kind = data_cfg.get("dataset", "cityscapes")
+    extensions = data_cfg.get("extensions")
+
     train_ds = SegDataset(
-        img_root=cfg["data"]["train_images"],
-        mask_root=cfg["data"]["train_masks"],
+        img_root=data_cfg["train_images"],
+        mask_root=data_cfg["train_masks"],
         img_t=img_t, mask_t=mask_t,
-        ignore_index=cfg["data"]["ignore_index"],
+        ignore_index=data_cfg["ignore_index"],
+        dataset=dataset_kind,
+        extensions=extensions,
     )
-    n = cfg["data"].get("sample_n_train")
+    n = data_cfg.get("sample_n_train")
     if n and n < len(train_ds):
         idx = list(range(len(train_ds)))
         random.Random(base_seed).shuffle(idx)

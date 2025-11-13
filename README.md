@@ -44,6 +44,8 @@ torchrun --nproc_per_node=8 -m src.train_seg --config configs/seg.yaml
 
 Der Encoder-Checkpoint landet standardmäßig unter `experiments/seg_cityscapes_1k_encoder_GE.pth` und wird von `configs/cyclegan.yaml` referenziert.
 
+**Andere Datensätze:** Über `data.dataset` lässt sich der Seg-Loader umschalten (`"cityscapes"` oder `"bdd100k"`). Für BDD müssen zudem passende `train_images`/`train_masks` angegeben werden; optional begrenzt `data.extensions` die erlaubten Dateiendungen.
+
 ## BDD100K Subset (optional)
 
 Erstelle ein kleines CycleGAN-Trainingsset aus BDD100K:

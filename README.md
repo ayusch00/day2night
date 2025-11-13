@@ -26,6 +26,22 @@ pip install -r requirements.txt
 
 Checkpoints werden unter `experiments/` abgelegt (inkl. Generatoren G/F und Discriminatoren Ds/Dt).
 
+### Segmentierungs‑Pretraining (Encoder)
+
+Die CycleGAN‑Generatoren nutzen einen Encoder, der zuvor auf Cityscapes segmentiert wurde. Trainiert ihn mit:
+
+```bash
+python -m src.train_seg --config configs/seg.yaml
+```
+
+Für Multi‑GPU‑Training empfiehlt sich DDP via `torchrun` (analog zu CycleGAN). Das Skript erkennt `WORLD_SIZE` automatisch:
+
+```bash
+torchrun --nproc_per_node=8 -m src.train_seg --config configs/seg.yaml
+```
+
+Der Encoder-Checkpoint landet standardmäßig unter `experiments/seg_cityscapes_1k_encoder_GE.pth` und wird von `configs/cyclegan.yaml` referenziert.
+
 ## BDD100K Subset (optional)
 
 Erstelle ein kleines CycleGAN-Trainingsset aus BDD100K:

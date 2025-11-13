@@ -8,7 +8,8 @@ data:
 
 transforms:
   resize: 256
-  random_crop: null
+  random_crop: 512
+  center_crop: 512
   random_flip: true
 
 model:

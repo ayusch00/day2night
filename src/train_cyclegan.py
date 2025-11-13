@@ -24,12 +24,12 @@ DEFAULT_EXTENSIONS = ("jpg", "jpeg", "png", "bmp", "tif", "tiff")
 
 def build_transform(cfg: dict) -> transforms.Compose:
     ops: list = []
-    resize = cfg.get("resize")
-    if resize:
-        ops.append(transforms.Resize((resize, resize)))
     crop = cfg.get("random_crop")
     if crop:
         ops.append(transforms.RandomCrop(crop))
+    resize = cfg.get("resize")
+    if resize:
+        ops.append(transforms.Resize((resize, resize), antialias=True))
     if cfg.get("random_flip", True):
         ops.append(transforms.RandomHorizontalFlip())
     ops.extend(

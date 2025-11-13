@@ -17,12 +17,12 @@ SUPPORTED_EXTENSIONS: Sequence[str] = ("jpg", "jpeg", "png", "bmp", "tif", "tiff
 def build_inference_transform(cfg: dict) -> transforms.Compose:
     ops: list = []
     tcfg = cfg.get("transforms", {})
+    center_crop = tcfg.get("center_crop")
+    if center_crop:
+        ops.append(transforms.CenterCrop(center_crop))
     resize = tcfg.get("resize")
     if resize:
-        ops.append(transforms.Resize((resize, resize)))
-    crop = tcfg.get("random_crop")
-    if crop:
-        ops.append(transforms.CenterCrop(crop))
+        ops.append(transforms.Resize((resize, resize), antialias=True))
     ops.extend(
         [
             transforms.ToTensor(),

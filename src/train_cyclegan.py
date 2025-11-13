@@ -1,6 +1,7 @@
 import glob
 import os
 import random
+import shutil
 from dataclasses import dataclass
 from itertools import chain
 from typing import Sequence
@@ -177,6 +178,7 @@ class ImagePool:
 
 
 def train(cfg_path: str = "configs/cyclegan.yaml"):
+    cfg_path = os.path.abspath(cfg_path)
     cfg = load_cfg(cfg_path)
     distributed, local_rank = init_distributed_if_needed()
     rank = dist.get_rank() if distributed else 0
@@ -307,14 +309,18 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
     save_every = cfg["logging"].get("save_every", 10)
     log_every = cfg["logging"].get("log_interval", 50)
 
+    config_filename = os.path.basename(cfg_path)
     if distributed:
         if is_main:
             exp_dir, results_dir = make_run_dirs(cfg)
+            shutil.copy(cfg_path, os.path.join(exp_dir, config_filename))
         else:
             exp_dir = results_dir = None
         exp_dir, results_dir = broadcast_dirs(exp_dir, results_dir)
     else:
         exp_dir, results_dir = make_run_dirs(cfg)
+        shutil.copy(cfg_path, os.path.join(exp_dir, config_filename))
+    loss_log_path = os.path.join(exp_dir, "loss_log.txt")
 
     scaler_G = GradScaler(enabled=use_amp)
     scaler_D = GradScaler(enabled=use_amp)
@@ -417,11 +423,14 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
 
         avg_all, _ = sync_meter_totals(meters, samples, device, distributed)
         if is_main:
-            print(
+            msg = (
                 f"[{epoch}/{epochs}] "
                 f"D={avg_all['d_total']:.4f} G={avg_all['g_total']:.4f} "
                 f"(adv={avg_all['g_adv']:.4f}, cycle={avg_all['g_cycle']:.4f}, id={avg_all['g_id']:.4f})"
             )
+            print(msg)
+            with open(loss_log_path, "a") as log_f:
+                log_f.write(msg + "\n")
 
             if epoch % save_every == 0 or epoch == epochs:
                 state = {

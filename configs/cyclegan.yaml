@@ -7,9 +7,9 @@ data:
   sample_limit: 1000
 
 transforms:
-  resize: 256
-  random_crop: 512
-  center_crop: 512
+  resize: 512
+  random_crop: 572
+  center_crop: 572
   random_flip: true
 
 model:

@@ -1,6 +1,7 @@
 # src/train_seg_min.py
-import os, torch, torch.nn as nn, random
+import os, torch, torch.nn as nn, random, time, shutil
 import torch.distributed as dist
+from torch.cuda.amp import GradScaler, autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, Subset, DistributedSampler
 from tqdm.auto import tqdm
@@ -29,11 +30,30 @@ def cleanup_distributed():
 
 def main(cfg_path="configs/seg.yaml"):
     cfg = load_cfg(cfg_path)
+    cfg_path = os.path.abspath(cfg_path)
     distributed, local_rank = init_distributed()
     rank = dist.get_rank() if distributed else 0
     is_main = rank == 0
     base_seed = cfg["train"]["seed"]
     set_seed(base_seed + rank)
+    use_amp = cfg["train"].get("amp", False)
+
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    log_cfg = cfg.get("logging", {})
+    out_root = log_cfg.get("out_dir", "experiments")
+    run_dir = os.path.join(out_root, f"{cfg['exp_name']}_{ts}") if is_main else None
+    config_filename = os.path.basename(cfg_path)
+    if distributed:
+        payload = [run_dir]
+        if is_main:
+            os.makedirs(run_dir, exist_ok=True)
+            shutil.copy(cfg_path, os.path.join(run_dir, config_filename))
+        dist.broadcast_object_list(payload, src=0)
+        run_dir = payload[0]
+    else:
+        os.makedirs(run_dir, exist_ok=True)
+        shutil.copy(cfg_path, os.path.join(run_dir, config_filename))
+    loss_log_path = os.path.join(run_dir, "loss_log.txt")
 
     img_t, mask_t = make_transforms(
         crop=cfg["transforms"]["crop"],
@@ -59,15 +79,14 @@ def main(cfg_path="configs/seg.yaml"):
         selected_imgs = [base_imgs[i] for i in train_ds.indices]
     else:
         selected_imgs = train_ds.imgs
-    out_dir = os.path.join(cfg.get("logging", {}).get("out_dir", "experiments"), cfg["exp_name"])
-    os.makedirs(out_dir, exist_ok=True)
-    filelist_path = os.path.join(out_dir, "train_files.txt")
+    filelist_path = os.path.join(run_dir, "train_files.txt")
     if is_main:
         with open(filelist_path, "w") as fh:
             for path in selected_imgs:
                 fh.write(f"{path}\n")
         print(f"Saved list of {len(selected_imgs)} training images to {filelist_path}")
 
+    world_size = dist.get_world_size() if distributed else 1
     train_sampler = DistributedSampler(train_ds, shuffle=True, drop_last=False) if distributed else None
     workers = cfg["train"]["workers"]
     train_dl = DataLoader(
@@ -83,6 +102,8 @@ def main(cfg_path="configs/seg.yaml"):
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA device required for segmentation training but none was found.")
     device = torch.device(f"cuda:{local_rank}") if distributed else torch.device("cuda")
+    if use_amp and device.type != "cuda":
+        raise RuntimeError("AMP requested but CUDA device not available.")
     model = SegNet9ResUNet(
         num_classes=cfg["data"]["num_classes"],
         base=cfg["model"]["base_channels"],
@@ -91,12 +112,19 @@ def main(cfg_path="configs/seg.yaml"):
     if distributed:
         model = DDP(model, device_ids=[local_rank], output_device=local_rank, broadcast_buffers=False)
 
+    global_batch = cfg["train"]["batch_size"] * world_size
+    ref_batch = max(1, cfg["train"].get("global_batch_ref", global_batch))
+    base_lr = cfg.get("optim", {}).get("lr", 2e-4)
+    scaled_lr = base_lr * (global_batch / ref_batch)
+    if is_main:
+        print(f"SegNet global batch={global_batch}, ref={ref_batch}, lr={scaled_lr:.6f}")
     opt = torch.optim.Adam(
         model.parameters(),
-        lr=cfg.get("optim", {}).get("lr", 2e-4),
+        lr=scaled_lr,
         betas=tuple(cfg.get("optim", {}).get("betas", [0.5, 0.999])),
     )
     crit = nn.CrossEntropyLoss(ignore_index=cfg["data"]["ignore_index"])
+    scaler = GradScaler(enabled=use_amp)
 
     for ep in range(1, cfg["train"]["epochs"] + 1):
         model.train()
@@ -114,9 +142,16 @@ def main(cfg_path="configs/seg.yaml"):
         for x, y in pbar:
             x, y = x.to(device), y.to(device)
             opt.zero_grad()
-            loss = crit(model(x), y)
-            loss.backward()
-            opt.step()
+            with autocast(enabled=use_amp):
+                logits = model(x)
+                loss = crit(logits, y)
+            if use_amp:
+                scaler.scale(loss).backward()
+                scaler.step(opt)
+                scaler.update()
+            else:
+                loss.backward()
+                opt.step()
             total += loss.item() * x.size(0)
             processed += x.size(0)
             if is_main:
@@ -127,9 +162,13 @@ def main(cfg_path="configs/seg.yaml"):
         total_loss = totals[0].item()
         total_samples = max(1, int(totals[1].item()))
         if is_main:
-            print(f"[{ep}/{cfg['train']['epochs']}] loss={total_loss/total_samples:.4f}")
+            msg = f"[{ep}/{cfg['train']['epochs']}] loss={total_loss/total_samples:.4f}"
+            print(msg)
+            with open(loss_log_path, "a") as log_f:
+                log_f.write(msg + "\n")
 
-    out = f"experiments/{cfg['exp_name']}_encoder_GE.pth"
+    artifact_name = cfg.get("artifacts", {}).get("encoder_weights", "encoder_GE.pth")
+    out = os.path.join(run_dir, artifact_name)
     core_model = model.module if isinstance(model, DDP) else model
     if is_main:
         torch.save(core_model.encoder.state_dict(), out)

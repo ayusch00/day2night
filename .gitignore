@@ -2,7 +2,9 @@
 /data
 /results
 /cityscapes_1k
-/experiments
+#/experiments
+epoch_*.pt
+#!epoch_0200.pt
 
 
 

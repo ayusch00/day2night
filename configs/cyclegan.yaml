@@ -19,7 +19,8 @@ model:
     base_channels: 64
     n_res_blocks: 9
     use_skip: true
-    encoder_checkpoint: experiments/seg_cityscapes_1k_encoder_GE.pth
+    encoder_checkpoint: experiments/seg_20251114_034923/encoder_GE.pth
+    #encoder_checkpoint: experiments/seg_cityscapes_1k_encoder_GE.pth
     freeze_encoder: true
     decoder_res_blocks: 3
   discriminator:

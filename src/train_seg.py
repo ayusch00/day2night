@@ -5,6 +5,8 @@ from torch.cuda.amp import GradScaler, autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, Subset, DistributedSampler
 from tqdm.auto import tqdm
+import numpy as np
+from PIL import Image
 from src.utils.common import load_cfg, set_seed
 from src.utils.transforms import make_transforms
 from src.utils.data_loading import SegDataset
@@ -28,6 +30,54 @@ def cleanup_distributed():
         dist.barrier()
         dist.destroy_process_group()
 
+def compute_class_weights(mask_paths, num_classes, ignore_index, desc="Class hist"):
+    counts = np.zeros(num_classes, dtype=np.float64)
+    for path in tqdm(mask_paths, desc=desc, leave=False):
+        mask = np.array(Image.open(path), dtype=np.int64)
+        valid = mask != ignore_index
+        if not np.any(valid):
+            continue
+        vals, freq = np.unique(mask[valid], return_counts=True)
+        for v, f in zip(vals, freq):
+            if 0 <= v < num_classes:
+                counts[v] += f
+    total = counts.sum()
+    if total == 0:
+        return np.ones(num_classes, dtype=np.float32)
+    freq = counts / total
+    weights = 1.0 / (freq + 1e-6)
+    weights[counts == 0] = 0.0
+    positive = weights[weights > 0]
+    if positive.size > 0:
+        weights /= positive.mean()
+    return weights.astype(np.float32)
+
+@torch.no_grad()
+def evaluate(model, loader, device, num_classes, ignore_index, distributed):
+    model.eval()
+    conf = torch.zeros((num_classes, num_classes), device=device)
+    for imgs, labels in loader:
+        imgs = imgs.to(device, non_blocking=True)
+        labels = labels.to(device, non_blocking=True)
+        logits = model(imgs)
+        preds = logits.argmax(1)
+        valid = labels != ignore_index
+        if not torch.any(valid):
+            continue
+        y = labels[valid].view(-1)
+        p = preds[valid].view(-1)
+        k = (y * num_classes + p).long()
+        binc = torch.bincount(k, minlength=num_classes ** 2)
+        conf += binc.view(num_classes, num_classes)
+    if distributed:
+        dist.all_reduce(conf)
+    inter = torch.diag(conf)
+    union = conf.sum(1) + conf.sum(0) - inter
+    iu = torch.where(union > 0, inter / union.clamp_min(1.0), torch.zeros_like(inter))
+    miou = iu.mean().item()
+    pix_acc = inter.sum().item() / conf.sum().clamp_min(1.0).item()
+    return miou, pix_acc
+
 def main(cfg_path="configs/seg.yaml"):
     cfg = load_cfg(cfg_path)
     cfg_path = os.path.abspath(cfg_path)
@@ -40,6 +90,7 @@ def main(cfg_path="configs/seg.yaml"):
 
     ts = time.strftime("%Y%m%d_%H%M%S")
     log_cfg = cfg.get("logging", {})
+    val_every = max(1, int(log_cfg.get("val_every", 1)))
     out_root = log_cfg.get("out_dir", "experiments")
     run_dir = os.path.join(out_root, f"{cfg['exp_name']}_{ts}") if is_main else None
     config_filename = os.path.basename(cfg_path)
@@ -55,10 +106,17 @@ def main(cfg_path="configs/seg.yaml"):
         shutil.copy(cfg_path, os.path.join(run_dir, config_filename))
     loss_log_path = os.path.join(run_dir, "loss_log.txt")
 
-    img_t, mask_t = make_transforms(
+    train_tf = make_transforms(
+        split="train",
         crop=cfg["transforms"]["crop"],
-        resize=cfg["transforms"]["resize"],
+        final=cfg["transforms"]["resize"],
         hflip=cfg["transforms"].get("hflip", True),
+    )
+    val_tf = make_transforms(
+        split="val",
+        crop=cfg["transforms"]["crop"],
+        final=cfg["transforms"]["resize"],
+        hflip=False,
     )
 
     data_cfg = cfg["data"]
@@ -68,7 +126,9 @@ def main(cfg_path="configs/seg.yaml"):
     train_ds = SegDataset(
         img_root=data_cfg["train_images"],
         mask_root=data_cfg["train_masks"],
-        img_t=img_t, mask_t=mask_t,
+        img_t=None,
+        mask_t=None,
+        pair_t=train_tf,
         ignore_index=data_cfg["ignore_index"],
         dataset=dataset_kind,
         extensions=extensions,
@@ -81,10 +141,13 @@ def main(cfg_path="configs/seg.yaml"):
 
     # Persist the exact list of images that participate in training for reproducibility.
     if isinstance(train_ds, Subset):
-        base_imgs = train_ds.dataset.imgs
-        selected_imgs = [base_imgs[i] for i in train_ds.indices]
+        base_dataset = train_ds.dataset
+        indices = train_ds.indices
+        selected_imgs = [base_dataset.imgs[i] for i in indices]
     else:
-        selected_imgs = train_ds.imgs
+        base_dataset = train_ds
+        indices = list(range(len(train_ds)))
+        selected_imgs = base_dataset.imgs
     filelist_path = os.path.join(run_dir, "train_files.txt")
     if is_main:
         with open(filelist_path, "w") as fh:
@@ -92,8 +155,35 @@ def main(cfg_path="configs/seg.yaml"):
                 fh.write(f"{path}\n")
         print(f"Saved list of {len(selected_imgs)} training images to {filelist_path}")
 
+    class_weight_list = None
+    if data_cfg.get("use_class_weights", False):
+        if is_main:
+            mask_paths = [base_dataset._mask_path(img_path) for img_path in selected_imgs]
+            class_weight_list = compute_class_weights(
+                mask_paths,
+                num_classes=cfg["data"]["num_classes"],
+                ignore_index=data_cfg["ignore_index"],
+                desc="Class weights",
+            ).tolist()
+        if distributed:
+            payload = [class_weight_list]
+            dist.broadcast_object_list(payload, src=0)
+            class_weight_list = payload[0]
+
     world_size = dist.get_world_size() if distributed else 1
+    val_ds = SegDataset(
+        img_root=data_cfg["val_images"],
+        mask_root=data_cfg["val_masks"],
+        img_t=None,
+        mask_t=None,
+        pair_t=val_tf,
+        ignore_index=data_cfg["ignore_index"],
+        dataset=dataset_kind,
+        extensions=extensions,
+    )
+
     train_sampler = DistributedSampler(train_ds, shuffle=True, drop_last=False) if distributed else None
+    val_sampler = DistributedSampler(val_ds, shuffle=False, drop_last=False) if distributed else None
     workers = cfg["train"]["workers"]
     train_dl = DataLoader(
         train_ds,
@@ -103,6 +193,15 @@ def main(cfg_path="configs/seg.yaml"):
         pin_memory=torch.cuda.is_available(),
         sampler=train_sampler,
         persistent_workers=workers > 0,
+    )
+    val_dl = DataLoader(
+        val_ds,
+        batch_size=cfg["train"]["batch_size"],
+        shuffle=False,
+        num_workers=workers,
+        pin_memory=torch.cuda.is_available(),
+        sampler=val_sampler,
+        persistent_workers=False,
     )
 
     if not torch.cuda.is_available():
@@ -129,7 +228,34 @@ def main(cfg_path="configs/seg.yaml"):
         lr=scaled_lr,
         betas=tuple(cfg.get("optim", {}).get("betas", [0.5, 0.999])),
     )
-    crit = nn.CrossEntropyLoss(ignore_index=cfg["data"]["ignore_index"])
+    sched_cfg = cfg.get("scheduler", {})
+    scheduler = None
+    if sched_cfg:
+        policy = sched_cfg.get("policy", "").lower()
+        if policy == "linear_decay_after_warm":
+            warm_epochs = int(sched_cfg.get("warm_epochs", 0))
+            decay_epochs = max(1, int(sched_cfg.get("decay_epochs", 1)))
+            min_lr = float(sched_cfg.get("min_lr", 0.0))
+            min_factor = 0.0 if scaled_lr <= 0 else min_lr / scaled_lr
+            min_factor = max(0.0, min(min_factor, 1.0))
+
+            def lr_lambda(epoch):
+                if epoch < warm_epochs:
+                    return 1.0
+                progress = min(1.0, (epoch - warm_epochs) / decay_epochs)
+                return max(min_factor, 1.0 - progress * (1.0 - min_factor))
+
+            scheduler = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda=lr_lambda)
+        elif policy == "cosine":
+            t_max = int(sched_cfg.get("t_max", cfg["train"]["epochs"]))
+            eta_min = float(sched_cfg.get("min_lr", 0.0))
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=t_max, eta_min=eta_min)
+
+    class_weights = (
+        torch.tensor(class_weight_list, dtype=torch.float32, device=device)
+        if class_weight_list is not None else None
+    )
+    crit = nn.CrossEntropyLoss(weight=class_weights, ignore_index=cfg["data"]["ignore_index"])
     scaler = GradScaler(enabled=use_amp)
 
     for ep in range(1, cfg["train"]["epochs"] + 1):
@@ -172,6 +298,28 @@ def main(cfg_path="configs/seg.yaml"):
             print(msg)
             with open(loss_log_path, "a") as log_f:
                 log_f.write(msg + "\n")
+        if scheduler is not None:
+            scheduler.step()
+
+        run_validation = (ep % val_every == 0)
+        if run_validation:
+            if val_sampler is not None:
+                val_sampler.set_epoch(ep)
+            miou, pix_acc = evaluate(
+                model,
+                val_dl,
+                device=device,
+                num_classes=cfg["data"]["num_classes"],
+                ignore_index=cfg["data"]["ignore_index"],
+                distributed=distributed,
+            )
+            if is_main:
+                val_msg = f"[val:{ep}] mIoU={miou:.4f}, pixAcc={pix_acc:.4f}"
+                print(val_msg)
+                with open(loss_log_path, "a") as log_f:
+                    log_f.write(val_msg + "\n")
+        if scheduler is not None:
+            scheduler.step()
 
     artifact_name = cfg.get("artifacts", {}).get("encoder_weights", "encoder_GE.pth")
     out = os.path.join(run_dir, artifact_name)

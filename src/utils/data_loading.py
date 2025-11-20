@@ -25,12 +25,14 @@ class SegDataset(Dataset):
         mask_root,
         img_t,
         mask_t,
+        pair_t=None,
         ignore_index=255,
         dataset="cityscapes",
         extensions=None,
     ):
         self.mask_root = mask_root
         self.img_t, self.mask_t = img_t, mask_t
+        self.pair_t = pair_t
         self.ignore_index = ignore_index
         self.dataset = dataset
         self.extensions = tuple(extensions) if extensions else DEFAULT_EXTENSIONS
@@ -61,9 +63,14 @@ class SegDataset(Dataset):
         mask_path = self._mask_path(img_path)
         if not os.path.isfile(mask_path):
             raise FileNotFoundError(f"Missing mask for {img_path}: expected {mask_path}")
-        img = self.img_t(Image.open(img_path).convert("RGB"))
+        img = Image.open(img_path).convert("RGB")
         mask = Image.open(mask_path)
-        mask = torch.from_numpy(np.array(self.mask_t(mask), dtype=np.int64))
+        if self.pair_t:
+            img, mask = self.pair_t(img, mask)
+            return img, mask
+        img = self.img_t(img) if self.img_t else img
+        mask = self.mask_t(mask) if self.mask_t else mask
+        mask = torch.from_numpy(np.array(mask, dtype=np.int64))
         return img, mask
 
     def __len__(self):

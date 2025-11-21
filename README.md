@@ -8,7 +8,10 @@ pip install -r requirements.txt
 ## CycleGAN Day↔Night Training
 
 1. Legen Sie Ihre Tages- und Nachtbilder unter `data/day` bzw. `data/night` ab (kann in `configs/cyclegan.yaml` angepasst werden). (1000 bilder each!)
-2. Legen Sie die trainierten Encoder-Gewichte aus der Segmentierung (Standard: `experiments/seg_cityscapes_1k_encoder_GE.pth`) bereit oder passen Sie den Pfad unter `model.generator.encoder_checkpoint` an.
+2. Legen Sie die trainierten Encoder-Gewichte aus der Segmentierung bereit. Setzen Sie `model.generator.encoder_checkpoint` auf
+   - `latest` (Standard, nimmt den jüngsten `experiments/seg_*/encoder_GE.pth`),
+   - `latest:<glob>` für eigene Muster (z. B. `latest:seg_cityscapes_*`),
+   - oder einen konkreten Pfad/Ordner mit `encoder_GE.pth`.
 3. Optional: Passen Sie Hyperparameter, Pfade oder Augmentationen in `configs/cyclegan.yaml` an.
 4. Starten Sie das Training (200 Epochen, davon 100 konstant, danach lineare LR-Absenkung):
 
@@ -42,7 +45,7 @@ Für Multi‑GPU‑Training empfiehlt sich DDP via `torchrun` (analog zu CycleGA
 torchrun --nproc_per_node=8 -m src.train_seg --config configs/seg.yaml
 ```
 
-Der Encoder-Checkpoint landet standardmäßig unter `experiments/seg_cityscapes_1k_encoder_GE.pth` und wird von `configs/cyclegan.yaml` referenziert.
+Der Encoder-Checkpoint landet standardmäßig unter `experiments/<seg_run>/encoder_GE.pth`. `configs/cyclegan.yaml` greift automatisch auf den jüngsten `seg_*`-Lauf zu (`encoder_checkpoint: latest`), kann bei Bedarf aber weiterhin auf einen festen Pfad zeigen.
 
 **Andere Datensätze:** Über `data.dataset` lässt sich der Seg-Loader umschalten (`"cityscapes"` oder `"bdd100k"`). Für BDD müssen zudem passende `train_images`/`train_masks` angegeben werden; optional begrenzt `data.extensions` die erlaubten Dateiendungen.
 
@@ -88,3 +91,10 @@ python data/make_test_split_bdd.py --root data/bdd100k --n 1000
 ```
 
 Das Skript liest `labels/bdd100k_labels_images_{train,val}.json`, vermeidet Überschneidungen mit bestehenden `cyclegan/train*`, bevorzugt `val` und erstellt `cyclegan/testA` (Tag) und `testB` (Nacht). `--copy` erzwingt Kopien statt Symlinks.
+
+Kurze Torchrun-Befehle:
+
+- SegNet DDP: `torchrun --nproc_per_node=8 -m src.train_seg --config configs/seg.yaml`
+- CycleGAN DDP: `torchrun --nproc_per_node=8 -m src.train_cyclegan --config configs/cyclegan.yaml`
+torchrun --nproc_per_node=8 -m src.train_seg --config configs/seg.yaml
+torchrun --nproc_per_node=8 -m src.train_cyclegan --config configs/cyclegan.yaml

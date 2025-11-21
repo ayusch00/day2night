@@ -2,20 +2,24 @@ exp_name: "seg"
 
 data:
   root: "data/bdd_split"
-  dataset: cityscapes #"bdd100k"  # use "cityscapes" for default mapping logic
+  dataset: bdd100k #"bdd100k"  # use "cityscapes" for default mapping logic
   extensions: ["jpg", "jpeg", "png"]
   #train_images: "data/bdd_split/segnet/trainA"
   #train_masks:  "data/bdd_split/segnet/trainA_mask"
   #val_images:   "data/bdd_split/segnet/valA"
   #val_masks:    "data/bdd_split/segnet/valA_mask"
-  train_images: "data/cityscapes/leftImg8bit/train"
-  train_masks:  "data/cityscapes/gtFine/train"
-  val_images:   "data/cityscapes/leftImg8bit/val"
-  val_masks:    "data/cityscapes/gtFine/val"
-  num_classes: 19
+  #train_images: "data/cityscapes/leftImg8bit/train"
+  #train_masks:  "data/cityscapes/gtFine/train"
+  #val_images:   "data/cityscapes/leftImg8bit/val"
+  #val_masks:    "data/cityscapes/gtFine/val"
+  train_images:  "data/bdd_kaggle_labels/bdd100k/bdd100k/images/10k/train"
+  train_masks:  "data/bdd_kaggle_labels/bdd100k_seg/bdd100k/seg/labels/train"
+  val_images:   "data/bdd_kaggle_labels/bdd100k/bdd100k/images/10k/val"
+  val_masks:    "data/bdd_kaggle_labels/bdd100k_seg/bdd100k/seg/labels/val"
+  num_classes: null  # null = automatisch aus Masken ermitteln
   ignore_index: 255
   use_class_weights: true
-  sample_n_train: 1000
+  sample_n_train: 2000
 
 train:
   epochs: 200
@@ -23,7 +27,7 @@ train:
   seed: 42
   workers: 4
   amp: true
-  global_batch_ref: 4
+  #global_batch_ref: 4
 
 optim:
   name: adam
@@ -42,8 +46,8 @@ model:
   n_resblocks: 9
 
 transforms:
-  crop: 572
-  resize: 512
+  crop: 512
+  resize: 256
   hflip: true
 
 logging:

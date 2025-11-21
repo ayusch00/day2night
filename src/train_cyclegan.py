@@ -17,7 +17,7 @@ from PIL import Image
 from tqdm.auto import tqdm
 
 from src.models.cyclegan import CycleGANGenerator, PatchDiscriminator, GANLoss
-from src.utils.common import load_cfg, set_seed, make_run_dirs
+from src.utils.common import load_cfg, set_seed, make_run_dirs, resolve_encoder_checkpoint
 
 
 DEFAULT_EXTENSIONS = ("jpg", "jpeg", "png", "bmp", "tif", "tiff")
@@ -227,7 +227,12 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
     gen_cfg = cfg["model"]["generator"]
     disc_cfg = cfg["model"]["discriminator"]
 
-    encoder_ckpt = gen_cfg.get("encoder_checkpoint")
+    encoder_ckpt = resolve_encoder_checkpoint(
+        gen_cfg.get("encoder_checkpoint"),
+        experiments_root=cfg["logging"].get("out_dir", "experiments"),
+        default_run_prefix=gen_cfg.get("encoder_run_prefix", "seg"),
+        filename=gen_cfg.get("encoder_filename", "encoder_GE.pth"),
+    )
     freeze_encoder = gen_cfg.get("freeze_encoder", False)
     decoder_res_blocks = gen_cfg.get("decoder_res_blocks", 3)
 

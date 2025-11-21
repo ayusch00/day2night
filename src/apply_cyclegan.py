@@ -9,27 +9,31 @@ from PIL import Image
 from torchvision import transforms
 
 from src.models.cyclegan import CycleGANGenerator
-from src.utils.common import load_cfg
+from src.utils.common import load_cfg, resolve_encoder_checkpoint
 
 SUPPORTED_EXTENSIONS: Sequence[str] = ("jpg", "jpeg", "png", "bmp", "tif", "tiff")
 
 
+def _expected_size_from_cfg(cfg: dict) -> tuple[int, int] | None:
+    resize = cfg.get("transforms", {}).get("resize")
+    if resize is None:
+        return None
+    if isinstance(resize, int):
+        return (resize, resize)
+    if isinstance(resize, Sequence) and len(resize) == 2:
+        return (int(resize[0]), int(resize[1]))
+    raise ValueError("transforms.resize must be an int or (width, height) tuple.")
+
+
 def build_inference_transform(cfg: dict) -> transforms.Compose:
-    ops: list = []
-    tcfg = cfg.get("transforms", {})
-    center_crop = tcfg.get("center_crop")
-    if center_crop:
-        ops.append(transforms.CenterCrop(center_crop))
-    resize = tcfg.get("resize")
-    if resize:
-        ops.append(transforms.Resize((resize, resize), antialias=True))
-    ops.extend(
-        [
-            transforms.ToTensor(),
-            transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
-        ]
-    )
-    return transforms.Compose(ops)
+    ops: list = [
+        transforms.ToTensor(),
+        transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+    ]
+    transform = transforms.Compose(ops)
+    expected_size = _expected_size_from_cfg(cfg)
+    setattr(transform, "expected_size", expected_size)
+    return transform
 
 
 def gather_image_paths(root: Path, extensions: Sequence[str]) -> list[Path]:
@@ -62,13 +66,19 @@ def find_checkpoint(checkpoint: str | None, cfg: dict) -> Path:
 
 def build_generator(cfg: dict, device: torch.device) -> CycleGANGenerator:
     gen_cfg = cfg["model"]["generator"]
+    encoder_ckpt = resolve_encoder_checkpoint(
+        gen_cfg.get("encoder_checkpoint"),
+        experiments_root=cfg["logging"].get("out_dir", "experiments"),
+        default_run_prefix=gen_cfg.get("encoder_run_prefix", "seg"),
+        filename=gen_cfg.get("encoder_filename", "encoder_GE.pth"),
+    )
     return CycleGANGenerator(
         in_channels=gen_cfg.get("in_channels", 3),
         out_channels=gen_cfg.get("out_channels", 3),
         base_channels=gen_cfg.get("base_channels", 64),
         n_res_blocks=gen_cfg.get("n_res_blocks", 9),
         use_skip=gen_cfg.get("use_skip", True),
-        encoder_checkpoint=gen_cfg.get("encoder_checkpoint"),
+        encoder_checkpoint=encoder_ckpt,
         freeze_encoder=gen_cfg.get("freeze_encoder", False),
         decoder_res_blocks=gen_cfg.get("decoder_res_blocks", 3),
     ).to(device)
@@ -88,11 +98,17 @@ def apply_generator(
     input_root: Path,
     device: torch.device,
 ) -> None:
+    expected_size: tuple[int, int] | None = getattr(transform, "expected_size", None)
     output_dir.mkdir(parents=True, exist_ok=True)
     generator.eval()
     with torch.inference_mode():
         for count, image_path in enumerate(image_paths, start=1):
             img = Image.open(image_path).convert("RGB")
+            if expected_size and img.size != expected_size:
+                raise ValueError(
+                    f"Input image {image_path} has size {img.size}, expected {expected_size}. "
+                    "Resize or pad the image beforehand."
+                )
             input_tensor = transform(img).unsqueeze(0).to(device)
             output_tensor = generator(input_tensor)
             result_img = tensor_to_pil(output_tensor)

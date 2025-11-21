@@ -52,6 +52,20 @@ def compute_class_weights(mask_paths, num_classes, ignore_index, desc="Class his
         weights /= positive.mean()
     return weights.astype(np.float32)
 
+def infer_num_classes(mask_paths, ignore_index):
+    max_class = -1
+    for path in tqdm(mask_paths, desc="Infer classes", leave=False):
+        mask = np.array(Image.open(path), dtype=np.int64)
+        valid = mask != ignore_index
+        if not np.any(valid):
+            continue
+        max_class = max(max_class, mask[valid].max())
+    if max_class < 0:
+        raise RuntimeError(
+            "Unable to infer number of classes. Ensure masks contain labels other than the ignore_index."
+        )
+    return int(max_class + 1)
+
 @torch.no_grad()
 def evaluate(model, loader, device, num_classes, ignore_index, distributed):
     model.eval()
@@ -155,13 +169,28 @@ def main(cfg_path="configs/seg.yaml"):
                 fh.write(f"{path}\n")
         print(f"Saved list of {len(selected_imgs)} training images to {filelist_path}")
 
+    mask_paths = None
+    if is_main and (data_cfg.get("use_class_weights", False) or data_cfg.get("num_classes") is None):
+        mask_paths = [base_dataset._mask_path(img_path) for img_path in selected_imgs]
+
+    if data_cfg.get("num_classes") is None:
+        inferred = None
+        if is_main:
+            inferred = infer_num_classes(mask_paths, data_cfg["ignore_index"])
+            print(f"Inferred {inferred} segmentation classes from masks.")
+        if distributed:
+            payload = [inferred]
+            dist.broadcast_object_list(payload, src=0)
+            inferred = payload[0]
+        data_cfg["num_classes"] = int(inferred)
+    num_classes = int(data_cfg["num_classes"])
+
     class_weight_list = None
     if data_cfg.get("use_class_weights", False):
         if is_main:
-            mask_paths = [base_dataset._mask_path(img_path) for img_path in selected_imgs]
             class_weight_list = compute_class_weights(
                 mask_paths,
-                num_classes=cfg["data"]["num_classes"],
+                num_classes=num_classes,
                 ignore_index=data_cfg["ignore_index"],
                 desc="Class weights",
             ).tolist()
@@ -298,8 +327,6 @@ def main(cfg_path="configs/seg.yaml"):
             print(msg)
             with open(loss_log_path, "a") as log_f:
                 log_f.write(msg + "\n")
-        if scheduler is not None:
-            scheduler.step()
 
         run_validation = (ep % val_every == 0)
         if run_validation:

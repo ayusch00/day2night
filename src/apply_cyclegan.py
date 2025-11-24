@@ -72,6 +72,7 @@ def build_generator(cfg: dict, device: torch.device) -> CycleGANGenerator:
         default_run_prefix=gen_cfg.get("encoder_run_prefix", "seg"),
         filename=gen_cfg.get("encoder_filename", "encoder_GE.pth"),
     )
+    print(f"Using encoder checkpoint: {encoder_ckpt or 'None (random init)'}")
     return CycleGANGenerator(
         in_channels=gen_cfg.get("in_channels", 3),
         out_channels=gen_cfg.get("out_channels", 3),

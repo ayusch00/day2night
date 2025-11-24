@@ -9,19 +9,28 @@ from torchvision import transforms
 
 from src.apply_cyclegan import build_inference_transform, find_checkpoint
 from src.models.cyclegan import CycleGANGenerator, PatchDiscriminator
-from src.utils.common import load_cfg
+from src.utils.common import load_cfg, resolve_encoder_checkpoint
 
 
-def _make_generator(cfg: dict, device: torch.device) -> CycleGANGenerator:
+def _make_generator(cfg: dict, device: torch.device, direction: str) -> CycleGANGenerator:
     gen_cfg = cfg["model"]["generator"]
+    encoder_ckpt = resolve_encoder_checkpoint(
+        gen_cfg.get("encoder_checkpoint"),
+        experiments_root=cfg["logging"].get("out_dir", "experiments"),
+        default_run_prefix=gen_cfg.get("encoder_run_prefix", "seg"),
+        filename=gen_cfg.get("encoder_filename", "encoder_GE.pth"),
+    )
+    use_encoder = direction == "day2night"
+    encoder_for_direction = encoder_ckpt if use_encoder else None
+    freeze_encoder = gen_cfg.get("freeze_encoder", False) if use_encoder else False
     return CycleGANGenerator(
         in_channels=gen_cfg.get("in_channels", 3),
         out_channels=gen_cfg.get("out_channels", 3),
         base_channels=gen_cfg.get("base_channels", 64),
         n_res_blocks=gen_cfg.get("n_res_blocks", 9),
         use_skip=gen_cfg.get("use_skip", True),
-        encoder_checkpoint=None,
-        freeze_encoder=gen_cfg.get("freeze_encoder", False),
+        encoder_checkpoint=encoder_for_direction,
+        freeze_encoder=freeze_encoder,
         decoder_res_blocks=gen_cfg.get("decoder_res_blocks", 3),
     ).to(device)
 
@@ -43,8 +52,8 @@ def load_models(cfg: dict, checkpoint: Path, device: torch.device, direction: st
     Returns the generator to inspect, plus both discriminators.
     """
     state = torch.load(checkpoint, map_location="cpu", weights_only=True)
-    G = _make_generator(cfg, device)
-    F = _make_generator(cfg, device)
+    G = _make_generator(cfg, device, direction="day2night")
+    F = _make_generator(cfg, device, direction="night2day")
     D_day = _make_discriminator(cfg, device)
     D_night = _make_discriminator(cfg, device)
 

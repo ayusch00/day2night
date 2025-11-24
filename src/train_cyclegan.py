@@ -189,7 +189,8 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
     if distributed and not torch.cuda.is_available():
         raise RuntimeError("Distributed training requires CUDA devices.")
     device = torch.device("cuda", local_rank) if distributed else torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    use_amp = cfg["train"].get("amp", True) and device.type == "cuda"
+    amp_device = device.type
+    use_amp = cfg["train"].get("amp", True) and amp_device == "cuda"
 
     img_t = build_transform(cfg["transforms"])
     data_cfg = cfg["data"]
@@ -233,10 +234,17 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
         default_run_prefix=gen_cfg.get("encoder_run_prefix", "seg"),
         filename=gen_cfg.get("encoder_filename", "encoder_GE.pth"),
     )
-    if is_main:
-        print(f"[CycleGAN] Using encoder checkpoint: {encoder_ckpt or 'None (random init)'}")
     freeze_encoder = gen_cfg.get("freeze_encoder", False)
     decoder_res_blocks = gen_cfg.get("decoder_res_blocks", 3)
+
+    # Paper setup: G (day->night) reuses and freezes the segmentation encoder, F (night->day) starts fresh.
+    g_encoder_ckpt = encoder_ckpt
+    g_freeze_encoder = freeze_encoder
+    f_encoder_ckpt = None
+    f_freeze_encoder = False
+    if is_main:
+        print(f"[CycleGAN] G (day->night) encoder: {g_encoder_ckpt or 'None'} | freeze={g_freeze_encoder}")
+        print(f"[CycleGAN] F (night->day) encoder: {f_encoder_ckpt or 'None'} | freeze={f_freeze_encoder}")
 
     G = CycleGANGenerator(
         in_channels=gen_cfg.get("in_channels", 3),
@@ -244,8 +252,8 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
         base_channels=gen_cfg.get("base_channels", 64),
         n_res_blocks=gen_cfg.get("n_res_blocks", 9),
         use_skip=gen_cfg.get("use_skip", True),
-        encoder_checkpoint=encoder_ckpt,
-        freeze_encoder=freeze_encoder,
+        encoder_checkpoint=g_encoder_ckpt,
+        freeze_encoder=g_freeze_encoder,
         decoder_res_blocks=decoder_res_blocks,
     ).to(device)
 
@@ -255,8 +263,8 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
         base_channels=gen_cfg.get("base_channels", 64),
         n_res_blocks=gen_cfg.get("n_res_blocks", 9),
         use_skip=gen_cfg.get("use_skip", True),
-        encoder_checkpoint=encoder_ckpt,
-        freeze_encoder=freeze_encoder,
+        encoder_checkpoint=f_encoder_ckpt,
+        freeze_encoder=f_freeze_encoder,
         decoder_res_blocks=decoder_res_blocks,
     ).to(device)
 
@@ -329,8 +337,8 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
         shutil.copy(cfg_path, os.path.join(exp_dir, config_filename))
     loss_log_path = os.path.join(exp_dir, "loss_log.txt")
 
-    scaler_G = amp.GradScaler(device_type="cuda", enabled=use_amp)
-    scaler_D = amp.GradScaler(device_type="cuda", enabled=use_amp)
+    scaler_G = amp.GradScaler(amp_device, enabled=use_amp)
+    scaler_D = amp.GradScaler(amp_device, enabled=use_amp)
     pool_size = cfg["train"].get("image_pool_size", 50)
     fake_day_pool = ImagePool(pool_size)
     fake_night_pool = ImagePool(pool_size)
@@ -376,7 +384,7 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
             # --- Train discriminators ---
             opt_D.zero_grad(set_to_none=True)
 
-            with amp.autocast(device_type="cuda", enabled=use_amp):
+            with amp.autocast(device_type=amp_device, enabled=use_amp):
                 fake_night = G(day).detach()
                 fake_day = F(night).detach()
                 fake_night_buf = fake_night_pool.query(fake_night)
@@ -396,7 +404,7 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
             # --- Train generators ---
             opt_G.zero_grad(set_to_none=True)
 
-            with amp.autocast(device_type="cuda", enabled=use_amp):
+            with amp.autocast(device_type=amp_device, enabled=use_amp):
                 fake_night = G(day)
                 fake_day = F(night)
 

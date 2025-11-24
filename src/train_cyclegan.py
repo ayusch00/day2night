@@ -9,7 +9,7 @@ from typing import Sequence
 import torch
 import torch.distributed as dist
 from torch import nn
-from torch.cuda.amp import GradScaler, autocast
+import torch.amp as amp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, Dataset, DistributedSampler
 from torchvision import transforms
@@ -277,7 +277,7 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
     ).to(device)
 
     if distributed:
-        ddp_kwargs = dict(device_ids=[device.index], output_device=device.index, find_unused_parameters=True)
+        ddp_kwargs = dict(device_ids=[device.index], output_device=device.index, find_unused_parameters=False)
         G = DDP(G, **ddp_kwargs)
         F = DDP(F, **ddp_kwargs)
         D_day = DDP(D_day, **ddp_kwargs)
@@ -329,8 +329,8 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
         shutil.copy(cfg_path, os.path.join(exp_dir, config_filename))
     loss_log_path = os.path.join(exp_dir, "loss_log.txt")
 
-    scaler_G = GradScaler(enabled=use_amp)
-    scaler_D = GradScaler(enabled=use_amp)
+    scaler_G = amp.GradScaler(device_type="cuda", enabled=use_amp)
+    scaler_D = amp.GradScaler(device_type="cuda", enabled=use_amp)
     pool_size = cfg["train"].get("image_pool_size", 50)
     fake_day_pool = ImagePool(pool_size)
     fake_night_pool = ImagePool(pool_size)
@@ -376,7 +376,7 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
             # --- Train discriminators ---
             opt_D.zero_grad(set_to_none=True)
 
-            with autocast(enabled=use_amp):
+            with amp.autocast(device_type="cuda", enabled=use_amp):
                 fake_night = G(day).detach()
                 fake_day = F(night).detach()
                 fake_night_buf = fake_night_pool.query(fake_night)
@@ -396,7 +396,7 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
             # --- Train generators ---
             opt_G.zero_grad(set_to_none=True)
 
-            with autocast(enabled=use_amp):
+            with amp.autocast(device_type="cuda", enabled=use_amp):
                 fake_night = G(day)
                 fake_day = F(night)
 

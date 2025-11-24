@@ -233,6 +233,8 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
         default_run_prefix=gen_cfg.get("encoder_run_prefix", "seg"),
         filename=gen_cfg.get("encoder_filename", "encoder_GE.pth"),
     )
+    if is_main:
+        print(f"[CycleGAN] Using encoder checkpoint: {encoder_ckpt or 'None (random init)'}")
     freeze_encoder = gen_cfg.get("freeze_encoder", False)
     decoder_res_blocks = gen_cfg.get("decoder_res_blocks", 3)
 

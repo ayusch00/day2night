@@ -64,7 +64,7 @@ def find_checkpoint(checkpoint: str | None, cfg: dict) -> Path:
     return candidates[-1]
 
 
-def build_generator(cfg: dict, device: torch.device) -> CycleGANGenerator:
+def build_generator(cfg: dict, device: torch.device, direction: str) -> CycleGANGenerator:
     gen_cfg = cfg["model"]["generator"]
     encoder_ckpt = resolve_encoder_checkpoint(
         gen_cfg.get("encoder_checkpoint"),
@@ -72,15 +72,21 @@ def build_generator(cfg: dict, device: torch.device) -> CycleGANGenerator:
         default_run_prefix=gen_cfg.get("encoder_run_prefix", "seg"),
         filename=gen_cfg.get("encoder_filename", "encoder_GE.pth"),
     )
-    print(f"Using encoder checkpoint: {encoder_ckpt or 'None (random init)'}")
+    # Paper setup: only G (day->night) reuses and freezes the segmentation encoder.
+    use_encoder = direction == "day2night"
+    encoder_for_direction = encoder_ckpt if use_encoder else None
+    freeze_encoder = gen_cfg.get("freeze_encoder", False) if use_encoder else False
+    print(
+        f"Building {direction} generator | encoder: {encoder_for_direction or 'None'} | freeze={freeze_encoder}"
+    )
     return CycleGANGenerator(
         in_channels=gen_cfg.get("in_channels", 3),
         out_channels=gen_cfg.get("out_channels", 3),
         base_channels=gen_cfg.get("base_channels", 64),
         n_res_blocks=gen_cfg.get("n_res_blocks", 9),
         use_skip=gen_cfg.get("use_skip", True),
-        encoder_checkpoint=encoder_ckpt,
-        freeze_encoder=gen_cfg.get("freeze_encoder", False),
+        encoder_checkpoint=encoder_for_direction,
+        freeze_encoder=freeze_encoder,
         decoder_res_blocks=gen_cfg.get("decoder_res_blocks", 3),
     ).to(device)
 
@@ -178,7 +184,7 @@ def main() -> None:
         raise RuntimeError(f"No images found in {input_dir} with extensions {extensions}")
 
     output_dir = Path(args.output_dir) / args.direction
-    generator = build_generator(cfg, device)
+    generator = build_generator(cfg, device, args.direction)
     state = torch.load(checkpoint, map_location="cpu", weights_only=True)
     key = "G" if args.direction == "day2night" else "F"
     generator.load_state_dict(state[key])

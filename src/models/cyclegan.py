@@ -150,7 +150,7 @@ class CycleGANGenerator(nn.Module):
     def load_encoder_weights(self, checkpoint_path: str, strict: bool = True) -> None:
         if not os.path.exists(checkpoint_path):
             raise FileNotFoundError(f"Encoder checkpoint not found: {checkpoint_path}")
-        state = torch.load(checkpoint_path, map_location="cpu")
+        state = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
         missing, unexpected = self.encoder.load_state_dict(state, strict=strict)
         if missing or unexpected:
             raise RuntimeError(

@@ -42,7 +42,7 @@ def load_models(cfg: dict, checkpoint: Path, device: torch.device, direction: st
     Build CycleGAN components and load weights from a checkpoint.
     Returns the generator to inspect, plus both discriminators.
     """
-    state = torch.load(checkpoint, map_location="cpu")
+    state = torch.load(checkpoint, map_location="cpu", weights_only=True)
     G = _make_generator(cfg, device)
     F = _make_generator(cfg, device)
     D_day = _make_discriminator(cfg, device)

@@ -179,7 +179,7 @@ def main() -> None:
 
     output_dir = Path(args.output_dir) / args.direction
     generator = build_generator(cfg, device)
-    state = torch.load(checkpoint, map_location="cpu")
+    state = torch.load(checkpoint, map_location="cpu", weights_only=True)
     key = "G" if args.direction == "day2night" else "F"
     generator.load_state_dict(state[key])
 

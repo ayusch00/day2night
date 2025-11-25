@@ -7,6 +7,7 @@ from typing import Iterable, Sequence
 import torch
 from PIL import Image
 from torchvision import transforms
+from torchvision.transforms import InterpolationMode
 
 from src.models.cyclegan import CycleGANGenerator
 from src.utils.common import load_cfg, resolve_encoder_checkpoint
@@ -14,25 +15,28 @@ from src.utils.common import load_cfg, resolve_encoder_checkpoint
 SUPPORTED_EXTENSIONS: Sequence[str] = ("jpg", "jpeg", "png", "bmp", "tif", "tiff")
 
 
-def _expected_size_from_cfg(cfg: dict) -> tuple[int, int] | None:
-    resize = cfg.get("transforms", {}).get("resize")
-    if resize is None:
-        return None
-    if isinstance(resize, int):
-        return (resize, resize)
-    if isinstance(resize, Sequence) and len(resize) == 2:
-        return (int(resize[0]), int(resize[1]))
-    raise ValueError("transforms.resize must be an int or (width, height) tuple.")
-
-
 def build_inference_transform(cfg: dict) -> transforms.Compose:
-    ops: list = [
-        transforms.ToTensor(),
-        transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
-    ]
+    tf_cfg = cfg.get("transforms", {})
+    resize = tf_cfg.get("resize")
+    center_crop = tf_cfg.get("center_crop")
+    ops: list = []
+    if resize:
+        if not isinstance(resize, int):
+            raise ValueError("transforms.resize must be a single int (shorter side) to keep aspect ratio.")
+        ops.append(transforms.Resize(resize, interpolation=InterpolationMode.BICUBIC, antialias=True))
+    if center_crop:
+        if not isinstance(center_crop, int):
+            raise ValueError("transforms.center_crop must be a single int for square crops.")
+        ops.append(transforms.CenterCrop((center_crop, center_crop)))
+    ops.extend(
+        [
+            transforms.ToTensor(),
+            transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+        ]
+    )
     transform = transforms.Compose(ops)
-    expected_size = _expected_size_from_cfg(cfg)
-    setattr(transform, "expected_size", expected_size)
+    # Keep attribute for compatibility with downstream checks; None means handled inside the transform.
+    setattr(transform, "expected_size", None)
     return transform
 
 
@@ -105,17 +109,11 @@ def apply_generator(
     input_root: Path,
     device: torch.device,
 ) -> None:
-    expected_size: tuple[int, int] | None = getattr(transform, "expected_size", None)
     output_dir.mkdir(parents=True, exist_ok=True)
     generator.eval()
     with torch.inference_mode():
         for count, image_path in enumerate(image_paths, start=1):
             img = Image.open(image_path).convert("RGB")
-            if expected_size and img.size != expected_size:
-                raise ValueError(
-                    f"Input image {image_path} has size {img.size}, expected {expected_size}. "
-                    "Resize or pad the image beforehand."
-                )
             input_tensor = transform(img).unsqueeze(0).to(device)
             output_tensor = generator(input_tensor)
             result_img = tensor_to_pil(output_tensor)

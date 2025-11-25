@@ -131,7 +131,7 @@ def main() -> None:
     parser.add_argument(
         "--auto-resize",
         action="store_true",
-        help="Resize the input to the configured size if it does not match exactly.",
+        help="Compatibility flag; transforms already resize before cropping.",
     )
     args = parser.parse_args()
 

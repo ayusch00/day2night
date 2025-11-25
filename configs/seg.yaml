@@ -47,7 +47,7 @@ model:
 
 transforms:
   crop: 512
-  resize: 256
+  resize: 572
   hflip: true
 
 logging:

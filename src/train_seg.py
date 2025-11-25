@@ -123,13 +123,13 @@ def main(cfg_path="configs/seg.yaml"):
     train_tf = make_transforms(
         split="train",
         crop=cfg["transforms"]["crop"],
-        final=cfg["transforms"]["resize"],
+        resize=cfg["transforms"]["resize"],
         hflip=cfg["transforms"].get("hflip", True),
     )
     val_tf = make_transforms(
         split="val",
         crop=cfg["transforms"]["crop"],
-        final=cfg["transforms"]["resize"],
+        resize=cfg["transforms"]["resize"],
         hflip=False,
     )
 

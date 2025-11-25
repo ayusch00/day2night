@@ -7,14 +7,23 @@ from torchvision.transforms import InterpolationMode
 
 
 class SegPairTransform:
-    def __init__(self, split, crop, final, hflip):
+    def __init__(self, split, resize, crop, hflip):
         split = split.lower()
         if split not in {"train", "val", "test"}:
             raise ValueError(f"Unsupported split '{split}' for segmentation transforms.")
+        if not isinstance(resize, int):
+            raise ValueError("resize must be a single int (shorter side) to keep aspect ratio.")
+        if not isinstance(crop, int):
+            raise ValueError("crop must be a single int to enforce square crops.")
         self.split = split
+        self.resize = resize
         self.crop = crop
-        self.final = final
         self.hflip = hflip and split == "train"
+
+    def _resize(self, img, mask):
+        img = F.resize(img, self.resize, interpolation=InterpolationMode.BICUBIC, antialias=True)
+        mask = F.resize(mask, self.resize, interpolation=InterpolationMode.NEAREST, antialias=False)
+        return img, mask
 
     def _crop(self, img, mask):
         if self.split == "train":
@@ -33,19 +42,18 @@ class SegPairTransform:
         return img, mask
 
     def __call__(self, img, mask):
+        img, mask = self._resize(img, mask)
         img, mask = self._crop(img, mask)
         img, mask = self._maybe_hflip(img, mask)
-        img = F.resize(img, (self.final, self.final), interpolation=InterpolationMode.BILINEAR, antialias=True)
-        mask = F.resize(mask, (self.final, self.final), interpolation=InterpolationMode.NEAREST)
         img = F.to_tensor(img)
         img = F.normalize(img, mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
         mask = torch.from_numpy(np.array(mask, dtype=np.int64))
         return img, mask
 
 
-def make_transforms(split, crop=512, final=256, hflip=True):
+def make_transforms(split, crop=512, resize=572, hflip=True):
     """
-    Match the paper: RandomCrop/CenterCrop -> Resize -> optional flip -> [-1,1] norm.
-    Returns a callable that receives (img, mask) and returns aligned tensors.
+    Resize shorter side -> crop -> optional flip -> [-1,1] norm.
+    Returns a callable that receives (img, mask) and returns aligned tensors without distorting aspect ratio.
     """
-    return SegPairTransform(split, crop, final, hflip)
+    return SegPairTransform(split, resize, crop, hflip)

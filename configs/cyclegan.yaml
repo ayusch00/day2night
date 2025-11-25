@@ -11,7 +11,7 @@ data:
   sample_limit: 2000
 
 transforms:
-  resize: 256
+  resize: 572
   random_crop: 512
   center_crop: 512
   random_flip: true

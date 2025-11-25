@@ -13,6 +13,7 @@ import torch.amp as amp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, Dataset, DistributedSampler
 from torchvision import transforms
+from torchvision.transforms import InterpolationMode
 from PIL import Image
 from tqdm.auto import tqdm
 
@@ -25,12 +26,16 @@ DEFAULT_EXTENSIONS = ("jpg", "jpeg", "png", "bmp", "tif", "tiff")
 
 def build_transform(cfg: dict) -> transforms.Compose:
     ops: list = []
-    crop = cfg.get("random_crop")
-    if crop:
-        ops.append(transforms.RandomCrop(crop))
     resize = cfg.get("resize")
     if resize:
-        ops.append(transforms.Resize((resize, resize), antialias=True))
+        if not isinstance(resize, int):
+            raise ValueError("transforms.resize must be a single int (shorter side) to keep aspect ratio.")
+        ops.append(transforms.Resize(resize, interpolation=InterpolationMode.BICUBIC, antialias=True))
+    crop = cfg.get("random_crop")
+    if crop:
+        if not isinstance(crop, int):
+            raise ValueError("transforms.random_crop must be a single int for square crops.")
+        ops.append(transforms.RandomCrop((crop, crop)))
     if cfg.get("random_flip", True):
         ops.append(transforms.RandomHorizontalFlip())
     ops.extend(

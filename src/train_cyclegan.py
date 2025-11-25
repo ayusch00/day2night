@@ -182,9 +182,10 @@ class ImagePool:
         return torch.cat(out, dim=0)
 
 
-def train(cfg_path: str = "configs/cyclegan.yaml"):
+def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
     cfg_path = os.path.abspath(cfg_path)
     cfg = load_cfg(cfg_path)
+    resume_ckpt = resume or cfg.get("train", {}).get("resume_checkpoint")
     distributed, local_rank = init_distributed_if_needed()
     rank = dist.get_rank() if distributed else 0
     is_main = rank == 0
@@ -330,16 +331,24 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
     log_every = cfg["logging"].get("log_interval", 50)
 
     config_filename = os.path.basename(cfg_path)
-    if distributed:
+    if resume_ckpt:
+        exp_dir = os.path.abspath(os.path.join(resume_ckpt, os.pardir))
+        results_dir = cfg["logging"].get("results_dir", "results")
         if is_main:
+            print(f"[Resume] Using existing run directory: {exp_dir}")
+        if distributed:
+            exp_dir, results_dir = broadcast_dirs(exp_dir, results_dir)
+    else:
+        if distributed:
+            if is_main:
+                exp_dir, results_dir = make_run_dirs(cfg)
+                shutil.copy(cfg_path, os.path.join(exp_dir, config_filename))
+            else:
+                exp_dir = results_dir = None
+            exp_dir, results_dir = broadcast_dirs(exp_dir, results_dir)
+        else:
             exp_dir, results_dir = make_run_dirs(cfg)
             shutil.copy(cfg_path, os.path.join(exp_dir, config_filename))
-        else:
-            exp_dir = results_dir = None
-        exp_dir, results_dir = broadcast_dirs(exp_dir, results_dir)
-    else:
-        exp_dir, results_dir = make_run_dirs(cfg)
-        shutil.copy(cfg_path, os.path.join(exp_dir, config_filename))
     loss_log_path = os.path.join(exp_dir, "loss_log.txt")
 
     scaler_G = amp.GradScaler(amp_device, enabled=use_amp)
@@ -356,7 +365,21 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
                     fh.write(f"{path}\n")
             print(f"Saved list of {len(dataset.paths)} {domain} images to {filelist_path}")
 
-    for epoch in range(1, epochs + 1):
+    start_epoch = 1
+    if resume_ckpt:
+        state = torch.load(resume_ckpt, map_location="cpu")
+        target = lambda m: m.module if isinstance(m, (nn.DataParallel, DDP)) else m
+        target(G).load_state_dict(state["G"])
+        target(F).load_state_dict(state["F"])
+        target(D_day).load_state_dict(state["D_day"])
+        target(D_night).load_state_dict(state["D_night"])
+        opt_G.load_state_dict(state["opt_G"])
+        opt_D.load_state_dict(state["opt_D"])
+        start_epoch = int(state.get("epoch", 0)) + 1
+        if is_main:
+            print(f"[Resume] Loaded checkpoint {resume_ckpt}, restarting from epoch {start_epoch}.")
+
+    for epoch in range(start_epoch, epochs + 1):
         set_linear_lr(opt_G, gen_lr, epoch, decay_start, epochs)
         set_linear_lr(opt_D, disc_lr, epoch, decay_start, epochs)
         if day_sampler:
@@ -476,5 +499,9 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", "-c", default="configs/cyclegan.yaml")
+    parser.add_argument(
+        "--resume",
+        help="Path to epoch_xxxx.pt to resume training (overrides train.resume_checkpoint in config).",
+    )
     args = parser.parse_args()
-    train(args.config)
+    train(args.config, resume=args.resume)

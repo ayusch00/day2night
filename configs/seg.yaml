@@ -58,3 +58,4 @@ logging:
 
 artifacts:
   encoder_weights: "encoder_GE.pth"
+  full_model: "segnet_full.pth"   # Optional: full SegNet (Encoder+Decoder) state_dict for downstream masking

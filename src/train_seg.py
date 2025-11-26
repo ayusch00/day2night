@@ -348,12 +348,18 @@ def main(cfg_path="configs/seg.yaml"):
         if scheduler is not None:
             scheduler.step()
 
-    artifact_name = cfg.get("artifacts", {}).get("encoder_weights", "encoder_GE.pth")
-    out = os.path.join(run_dir, artifact_name)
+    artifacts_cfg = cfg.get("artifacts", {})
+    enc_name = artifacts_cfg.get("encoder_weights", "encoder_GE.pth")
+    full_name = artifacts_cfg.get("full_model", "segnet_full.pth")
     core_model = model.module if isinstance(model, DDP) else model
     if is_main:
-        torch.save(core_model.encoder.state_dict(), out)
-        print(f"Saved encoder to {out}")
+        enc_out = os.path.join(run_dir, enc_name)
+        torch.save(core_model.encoder.state_dict(), enc_out)
+        print(f"Saved encoder to {enc_out}")
+        if full_name:
+            full_out = os.path.join(run_dir, full_name)
+            torch.save(core_model.state_dict(), full_out)
+            print(f"Saved full SegNet to {full_out}")
     cleanup_distributed()
 
 if __name__ == "__main__":

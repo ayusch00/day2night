@@ -27,7 +27,7 @@ model:
     #encoder_checkpoint: latest:seg_cityscapes_*   # optional glob override
     #encoder_checkpoint: experiments/custom_run/encoder_GE.pth
     #encoder_checkpoint: experiments/seg_cityscapes_1k_encoder_GE.pth
-    freeze_encoder: false
+    freeze_encoder: true
     decoder_res_blocks: 3
   discriminator:
     in_channels: 3
@@ -38,7 +38,7 @@ model:
 
 loss:
   lambda_cycle: 10.0
-  lambda_identity: 3.0
+  lambda_identity: 3.5
 
 optim:
   generator:

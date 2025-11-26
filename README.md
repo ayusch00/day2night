@@ -98,3 +98,6 @@ Kurze Torchrun-Befehle:
 - CycleGAN DDP: `torchrun --nproc_per_node=8 -m src.train_cyclegan --config configs/cyclegan.yaml`
 torchrun --nproc_per_node=8 -m src.train_seg --config configs/seg.yaml
 torchrun --nproc_per_node=8 -m src.train_cyclegan --config configs/cyclegan.yaml
+
+
+torchrun --nproc_per_node=… -m src.train_cyclegan --config configs/cyclegan.yaml --resume experiments/cyclegan_day2night_20251125_135404/epoch_0100.pt

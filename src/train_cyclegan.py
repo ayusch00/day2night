@@ -9,6 +9,7 @@ from typing import Sequence
 import torch
 import torch.distributed as dist
 from torch import nn
+import torch.nn.functional as Fnn
 import torch.amp as amp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, Dataset, DistributedSampler
@@ -18,6 +19,7 @@ from PIL import Image
 from tqdm.auto import tqdm
 
 from src.models.cyclegan import CycleGANGenerator, PatchDiscriminator, GANLoss
+from src.models.seg_unet_resnet import SegNet9ResUNet
 from src.utils.common import load_cfg, set_seed, make_run_dirs, resolve_encoder_checkpoint
 
 
@@ -96,6 +98,7 @@ class LossMeters:
     g_adv: float = 0.0
     g_cycle: float = 0.0
     g_id: float = 0.0
+    g_sky: float = 0.0
     d_total: float = 0.0
 
     def update(self, losses: dict[str, float], batch_size: int):
@@ -103,7 +106,8 @@ class LossMeters:
             setattr(self, k, getattr(self, k) + v * batch_size)
 
     def average(self, samples: int) -> dict[str, float]:
-        return {k: getattr(self, k) / samples for k in ["g_total", "g_adv", "g_cycle", "g_id", "d_total"]}
+        keys = ["g_total", "g_adv", "g_cycle", "g_id", "g_sky", "d_total"]
+        return {k: getattr(self, k) / samples for k in keys}
 
 
 def distributed_world_size() -> int:
@@ -134,7 +138,7 @@ def broadcast_dirs(exp_dir: str | None, results_dir: str | None) -> tuple[str, s
 
 
 def sync_meter_totals(meters: LossMeters, samples: int, device: torch.device, distributed: bool) -> tuple[dict[str, float], int]:
-    keys = ["g_total", "g_adv", "g_cycle", "g_id", "d_total"]
+    keys = ["g_total", "g_adv", "g_cycle", "g_id", "g_sky", "d_total"]
     totals = torch.tensor([getattr(meters, k) for k in keys], device=device)
     sample_tensor = torch.tensor([samples], device=device)
     if distributed:
@@ -153,6 +157,14 @@ def set_linear_lr(optimizer, base_lr, epoch, decay_start, total_epochs):
         factor = max(0.0, 1.0 - (epoch - decay_start) / decay_epochs)
     for group in optimizer.param_groups:
         group["lr"] = base_lr * factor
+
+
+def total_variation_loss(img: torch.Tensor) -> torch.Tensor:
+    if img.numel() == 0:
+        return torch.zeros((), device=img.device, dtype=img.dtype)
+    loss_h = (img[:, :, 1:, :] - img[:, :, :-1, :]).abs().mean()
+    loss_w = (img[:, :, :, 1:] - img[:, :, :, :-1]).abs().mean()
+    return loss_h + loss_w
 
 
 class ImagePool:
@@ -290,6 +302,17 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
         use_spectral_norm=disc_cfg.get("use_spectral_norm", False),
     ).to(device)
 
+    sky_cfg = cfg.get("sky_loss", {})
+    use_sky_loss = bool(sky_cfg.get("enabled", False))
+    sky_class_ids: list[int] = sky_cfg.get("class_ids", []) or []
+    sky_class_ids = [int(c) for c in sky_class_ids]
+    sky_weight = float(sky_cfg.get("weight", sky_cfg.get("lambda", sky_cfg.get("lambda_sky", 0.0))))
+    sky_tv_weight = float(sky_cfg.get("tv_weight", 0.0))
+    sky_input_size = sky_cfg.get("seg_input_size")
+    if sky_input_size is not None:
+        sky_input_size = tuple(int(x) for x in sky_input_size)
+    seg_model = None
+
     if distributed:
         ddp_kwargs = dict(device_ids=[device.index], output_device=device.index, find_unused_parameters=False)
         G = DDP(G, **ddp_kwargs)
@@ -301,6 +324,63 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
         F = nn.DataParallel(F)
         D_day = nn.DataParallel(D_day)
         D_night = nn.DataParallel(D_night)
+
+    if use_sky_loss:
+        seg_ckpt_spec = sky_cfg.get("seg_checkpoint") or "latest"
+        seg_ckpt = None
+        num_classes = int(sky_cfg.get("num_classes", 19) or 19)
+        sky_seg_filename = sky_cfg.get("seg_filename", "segnet_full.pth") or "segnet_full.pth"
+        experiments_root = cfg["logging"].get("out_dir", "experiments")
+        sky_run_prefix = sky_cfg.get("seg_run_prefix", "seg") or "seg"
+        if not sky_class_ids:
+            if is_main:
+                print("[SkyLoss] Disabled: sky_loss.class_ids is empty.")
+            use_sky_loss = False
+        else:
+            try:
+                seg_ckpt = resolve_encoder_checkpoint(
+                    seg_ckpt_spec,
+                    experiments_root=experiments_root,
+                    default_run_prefix=sky_run_prefix,
+                    filename=sky_seg_filename,
+                )
+            except FileNotFoundError:
+                if is_main:
+                    print(
+                        f"[SkyLoss] Disabled: no seg checkpoint found for spec='{seg_ckpt_spec}' "
+                        f"(pattern {sky_run_prefix}_*/{sky_seg_filename})."
+                    )
+                use_sky_loss = False
+            if use_sky_loss:
+                seg_model = SegNet9ResUNet(num_classes=num_classes).to(device)
+                try:
+                    state = torch.load(seg_ckpt, map_location="cpu")
+                    if not isinstance(state, dict):
+                        raise RuntimeError("Checkpoint must be a state_dict or dict with 'state_dict'.")
+                    state_dict = state["state_dict"] if "state_dict" in state else state
+                    if state_dict and all(k.startswith("module.") for k in state_dict):
+                        state_dict = {k.replace("module.", "", 1): v for k, v in state_dict.items()}
+                    missing, unexpected = seg_model.load_state_dict(state_dict, strict=False)
+                    if missing:
+                        raise RuntimeError(
+                            f"Missing keys when loading seg checkpoint (need full encoder+decoder): {missing[:5]}"
+                        )
+                    if unexpected and is_main:
+                        print(f"[SkyLoss] Loaded seg checkpoint with unexpected={unexpected}")
+                except Exception as exc:  # noqa: BLE001
+                    if is_main:
+                        print(f"[SkyLoss] Disabled: failed to load seg checkpoint ({exc}).")
+                    seg_model = None
+                    use_sky_loss = False
+                else:
+                    seg_model.eval()
+                    for p in seg_model.parameters():
+                        p.requires_grad = False
+                    if is_main:
+                        print(
+                            f"[SkyLoss] Enabled: classes={sky_class_ids}, weight={sky_weight}, "
+                            f"tv_weight={sky_tv_weight}, ckpt={seg_ckpt}"
+                        )
 
     gan_loss = GANLoss().to(device)
     l1_loss = nn.L1Loss()
@@ -446,7 +526,36 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
                 id_night = G(night)
                 id_loss = l1_loss(id_day, day) + l1_loss(id_night, night)
 
+                sky_loss_term = fake_night.new_zeros(())
+                sky_tv_term = fake_night.new_zeros(())
+                if use_sky_loss and seg_model is not None:
+                    with torch.no_grad(), amp.autocast(device_type=amp_device, enabled=False):
+                        seg_in = day
+                        if sky_input_size is not None:
+                            seg_in = Fnn.interpolate(
+                                seg_in,
+                                size=sky_input_size,
+                                mode="bilinear",
+                                align_corners=False,
+                            )
+                        seg_logits = seg_model(seg_in)
+                        seg_pred = seg_logits.argmax(dim=1)
+                        mask = torch.zeros_like(seg_pred, dtype=torch.float32)
+                        for cid in sky_class_ids:
+                            if cid < 0:
+                                continue
+                            mask = mask + (seg_pred == cid).float()
+                        mask = mask.clamp(max=1.0)
+                        sky_mask = Fnn.interpolate(mask.unsqueeze(1), size=fake_night.shape[2:], mode="nearest")
+                        sky_mask = sky_mask.to(dtype=fake_night.dtype)
+                    if torch.any(sky_mask):
+                        sky_loss_term = ((fake_night - day).abs() * sky_mask).mean()
+                        if sky_tv_weight > 0.0:
+                            sky_tv_term = total_variation_loss(fake_night * sky_mask)
+
                 total_g = adv_loss + lambda_cycle * cycle_loss + lambda_id * id_loss
+                if use_sky_loss and seg_model is not None:
+                    total_g = total_g + sky_weight * sky_loss_term + sky_tv_weight * sky_tv_term
             scaler_G.scale(total_g).backward()
             scaler_G.step(opt_G)
             scaler_G.update()
@@ -456,21 +565,28 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
                 "g_adv": adv_loss.item(),
                 "g_cycle": cycle_loss.item(),
                 "g_id": id_loss.item(),
+                "g_sky": (sky_weight * sky_loss_term + sky_tv_weight * sky_tv_term).item()
+                if use_sky_loss and seg_model is not None
+                else 0.0,
                 "d_total": loss_d.item(),
             }
             meters.update(batch_losses, bsz)
 
             if is_main and (step + 1) % log_every == 0 and hasattr(iterator, "set_postfix"):
                 avg_local = meters.average(samples)
-                iterator.set_postfix({k: f"{v:.4f}" for k, v in avg_local.items()})
+                postfix = {k: f"{v:.4f}" for k, v in avg_local.items()}
+                if not use_sky_loss:
+                    postfix.pop("g_sky", None)
+                iterator.set_postfix(postfix)
 
         avg_all, _ = sync_meter_totals(meters, samples, device, distributed)
         if is_main:
-            msg = (
-                f"[{epoch}/{epochs}] "
-                f"D={avg_all['d_total']:.4f} G={avg_all['g_total']:.4f} "
-                f"(adv={avg_all['g_adv']:.4f}, cycle={avg_all['g_cycle']:.4f}, id={avg_all['g_id']:.4f})"
+            detail = (
+                f"adv={avg_all['g_adv']:.4f}, cycle={avg_all['g_cycle']:.4f}, id={avg_all['g_id']:.4f}"
             )
+            if use_sky_loss:
+                detail += f", sky={avg_all['g_sky']:.4f}"
+            msg = f"[{epoch}/{epochs}] D={avg_all['d_total']:.4f} G={avg_all['g_total']:.4f} ({detail})"
             print(msg)
             with open(loss_log_path, "a") as log_f:
                 log_f.write(msg + "\n")

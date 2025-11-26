@@ -30,6 +30,7 @@ pip install -r requirements.txt
 Checkpoints werden unter `experiments/` abgelegt (inkl. Generatoren G/F und Discriminatoren Ds/Dt).
 
 - **Stabilitäts-Tuning:** Standardmäßig läuft TTUR (G = 2e‑4, D = 1e‑4), die Discriminatoren können optional per SpectralNorm verstärkt werden (`model.discriminator.use_spectral_norm`) und ein Replay-Buffer (`train.image_pool_size`, default 50) glättet das D-Training.
+- **Sky-Identity-Loss (optional):** Setze `sky_loss.enabled: true` in `configs/cyclegan.yaml`, trage `class_ids` (z. B. Cityscapes sky=10, vegetation=8). `seg_checkpoint: null`/`latest` sucht automatisch das jüngste `experiments/seg_*/segnet_full.pth` (oder setze explizit einen Pfad). Der Loss bremst neue Punktlichter im Himmel/Baum-Bereich für Day→Night, mit optionaler Glättung (`tv_weight`).
 
 ### Segmentierungs‑Pretraining (Encoder)
 

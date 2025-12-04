@@ -14,9 +14,16 @@ def cityscapes_mask_path(img_path, mask_root):
     base = os.path.basename(img_path).replace(CITYSCAPES_SUFFIX, "_gtFine_labelTrainIds.png")
     return os.path.join(mask_root, city, base)
 
-def bdd100k_mask_path(img_path, mask_root):
-    base = os.path.splitext(os.path.basename(img_path))[0] + ".png"
-    return os.path.join(mask_root, base)
+def bdd100k_mask_path(img_path, mask_root, strict=True):
+    base = os.path.splitext(os.path.basename(img_path))[0]
+    candidates = [f"{base}.png", f"{base}_train_id.png"]
+    for name in candidates:
+        mask_path = os.path.join(mask_root, name)
+        if os.path.isfile(mask_path):
+            return mask_path
+    if strict:
+        raise FileNotFoundError(f"Missing mask for {img_path}: expected one of {candidates}")
+    return None
 
 class SegDataset(Dataset):
     def __init__(
@@ -31,6 +38,7 @@ class SegDataset(Dataset):
         extensions=None,
     ):
         self.mask_root = mask_root
+        self.mask_lookup = None
         self.img_t, self.mask_t = img_t, mask_t
         self.pair_t = pair_t
         self.ignore_index = ignore_index
@@ -46,7 +54,21 @@ class SegDataset(Dataset):
             paths = []
             for ext in self.extensions:
                 paths.extend(glob.glob(os.path.join(img_root, f"**/*.{ext}"), recursive=True))
-            self.imgs = sorted(set(paths))
+            unique = sorted(set(paths))
+            pairs = []
+            missing = 0
+            for img_path in unique:
+                mask_path = bdd100k_mask_path(img_path, mask_root, strict=False)
+                if mask_path:
+                    pairs.append((img_path, mask_path))
+                else:
+                    missing += 1
+            self.imgs = [img for img, _ in pairs]
+            self.mask_lookup = {img: mask for img, mask in pairs}
+            if missing > 0:
+                print(
+                    f"[SegDataset] Skipped {missing} BDD images without masks under {mask_root}."
+                )
             self.mask_resolver = bdd100k_mask_path
         else:
             raise ValueError(f"Unsupported segmentation dataset '{dataset}'.")
@@ -55,6 +77,10 @@ class SegDataset(Dataset):
             raise RuntimeError(f"No images found for dataset '{dataset}' under {img_root}.")
 
     def _mask_path(self, img_path):
+        if self.mask_lookup is not None:
+            mask_path = self.mask_lookup.get(img_path)
+            if mask_path is not None:
+                return mask_path
         return self.mask_resolver(img_path, self.mask_root)
 
     def __getitem__(self, i):

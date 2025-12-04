@@ -9,15 +9,18 @@ from typing import Sequence
 import torch
 import torch.distributed as dist
 from torch import nn
-from torch.cuda.amp import GradScaler, autocast
+import torch.nn.functional as Fnn
+import torch.amp as amp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, Dataset, DistributedSampler
 from torchvision import transforms
+from torchvision.transforms import InterpolationMode
 from PIL import Image
 from tqdm.auto import tqdm
 
 from src.models.cyclegan import CycleGANGenerator, PatchDiscriminator, GANLoss
-from src.utils.common import load_cfg, set_seed, make_run_dirs
+from src.models.seg_unet_resnet import SegNet9ResUNet
+from src.utils.common import load_cfg, set_seed, make_run_dirs, resolve_encoder_checkpoint
 
 
 DEFAULT_EXTENSIONS = ("jpg", "jpeg", "png", "bmp", "tif", "tiff")
@@ -25,12 +28,16 @@ DEFAULT_EXTENSIONS = ("jpg", "jpeg", "png", "bmp", "tif", "tiff")
 
 def build_transform(cfg: dict) -> transforms.Compose:
     ops: list = []
-    crop = cfg.get("random_crop")
-    if crop:
-        ops.append(transforms.RandomCrop(crop))
     resize = cfg.get("resize")
     if resize:
-        ops.append(transforms.Resize((resize, resize), antialias=True))
+        if not isinstance(resize, int):
+            raise ValueError("transforms.resize must be a single int (shorter side) to keep aspect ratio.")
+        ops.append(transforms.Resize(resize, interpolation=InterpolationMode.BICUBIC, antialias=True))
+    crop = cfg.get("random_crop")
+    if crop:
+        if not isinstance(crop, int):
+            raise ValueError("transforms.random_crop must be a single int for square crops.")
+        ops.append(transforms.RandomCrop((crop, crop)))
     if cfg.get("random_flip", True):
         ops.append(transforms.RandomHorizontalFlip())
     ops.extend(
@@ -91,6 +98,7 @@ class LossMeters:
     g_adv: float = 0.0
     g_cycle: float = 0.0
     g_id: float = 0.0
+    g_sky: float = 0.0
     d_total: float = 0.0
 
     def update(self, losses: dict[str, float], batch_size: int):
@@ -98,7 +106,8 @@ class LossMeters:
             setattr(self, k, getattr(self, k) + v * batch_size)
 
     def average(self, samples: int) -> dict[str, float]:
-        return {k: getattr(self, k) / samples for k in ["g_total", "g_adv", "g_cycle", "g_id", "d_total"]}
+        keys = ["g_total", "g_adv", "g_cycle", "g_id", "g_sky", "d_total"]
+        return {k: getattr(self, k) / samples for k in keys}
 
 
 def distributed_world_size() -> int:
@@ -129,7 +138,7 @@ def broadcast_dirs(exp_dir: str | None, results_dir: str | None) -> tuple[str, s
 
 
 def sync_meter_totals(meters: LossMeters, samples: int, device: torch.device, distributed: bool) -> tuple[dict[str, float], int]:
-    keys = ["g_total", "g_adv", "g_cycle", "g_id", "d_total"]
+    keys = ["g_total", "g_adv", "g_cycle", "g_id", "g_sky", "d_total"]
     totals = torch.tensor([getattr(meters, k) for k in keys], device=device)
     sample_tensor = torch.tensor([samples], device=device)
     if distributed:
@@ -148,6 +157,14 @@ def set_linear_lr(optimizer, base_lr, epoch, decay_start, total_epochs):
         factor = max(0.0, 1.0 - (epoch - decay_start) / decay_epochs)
     for group in optimizer.param_groups:
         group["lr"] = base_lr * factor
+
+
+def total_variation_loss(img: torch.Tensor) -> torch.Tensor:
+    if img.numel() == 0:
+        return torch.zeros((), device=img.device, dtype=img.dtype)
+    loss_h = (img[:, :, 1:, :] - img[:, :, :-1, :]).abs().mean()
+    loss_w = (img[:, :, :, 1:] - img[:, :, :, :-1]).abs().mean()
+    return loss_h + loss_w
 
 
 class ImagePool:
@@ -177,9 +194,10 @@ class ImagePool:
         return torch.cat(out, dim=0)
 
 
-def train(cfg_path: str = "configs/cyclegan.yaml"):
+def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
     cfg_path = os.path.abspath(cfg_path)
     cfg = load_cfg(cfg_path)
+    resume_ckpt = resume or cfg.get("train", {}).get("resume_checkpoint")
     distributed, local_rank = init_distributed_if_needed()
     rank = dist.get_rank() if distributed else 0
     is_main = rank == 0
@@ -189,7 +207,8 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
     if distributed and not torch.cuda.is_available():
         raise RuntimeError("Distributed training requires CUDA devices.")
     device = torch.device("cuda", local_rank) if distributed else torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    use_amp = cfg["train"].get("amp", True) and device.type == "cuda"
+    amp_device = device.type
+    use_amp = cfg["train"].get("amp", True) and amp_device == "cuda"
 
     img_t = build_transform(cfg["transforms"])
     data_cfg = cfg["data"]
@@ -227,9 +246,23 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
     gen_cfg = cfg["model"]["generator"]
     disc_cfg = cfg["model"]["discriminator"]
 
-    encoder_ckpt = gen_cfg.get("encoder_checkpoint")
+    encoder_ckpt = resolve_encoder_checkpoint(
+        gen_cfg.get("encoder_checkpoint"),
+        experiments_root=cfg["logging"].get("out_dir", "experiments"),
+        default_run_prefix=gen_cfg.get("encoder_run_prefix", "seg"),
+        filename=gen_cfg.get("encoder_filename", "encoder_GE.pth"),
+    )
     freeze_encoder = gen_cfg.get("freeze_encoder", False)
     decoder_res_blocks = gen_cfg.get("decoder_res_blocks", 3)
+
+    # Paper setup: G (day->night) reuses and freezes the segmentation encoder, F (night->day) starts fresh.
+    g_encoder_ckpt = encoder_ckpt
+    g_freeze_encoder = freeze_encoder
+    f_encoder_ckpt = None
+    f_freeze_encoder = False
+    if is_main:
+        print(f"[CycleGAN] G (day->night) encoder: {g_encoder_ckpt or 'None'} | freeze={g_freeze_encoder}")
+        print(f"[CycleGAN] F (night->day) encoder: {f_encoder_ckpt or 'None'} | freeze={f_freeze_encoder}")
 
     G = CycleGANGenerator(
         in_channels=gen_cfg.get("in_channels", 3),
@@ -237,8 +270,8 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
         base_channels=gen_cfg.get("base_channels", 64),
         n_res_blocks=gen_cfg.get("n_res_blocks", 9),
         use_skip=gen_cfg.get("use_skip", True),
-        encoder_checkpoint=encoder_ckpt,
-        freeze_encoder=freeze_encoder,
+        encoder_checkpoint=g_encoder_ckpt,
+        freeze_encoder=g_freeze_encoder,
         decoder_res_blocks=decoder_res_blocks,
     ).to(device)
 
@@ -248,8 +281,8 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
         base_channels=gen_cfg.get("base_channels", 64),
         n_res_blocks=gen_cfg.get("n_res_blocks", 9),
         use_skip=gen_cfg.get("use_skip", True),
-        encoder_checkpoint=encoder_ckpt,
-        freeze_encoder=freeze_encoder,
+        encoder_checkpoint=f_encoder_ckpt,
+        freeze_encoder=f_freeze_encoder,
         decoder_res_blocks=decoder_res_blocks,
     ).to(device)
 
@@ -269,8 +302,21 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
         use_spectral_norm=disc_cfg.get("use_spectral_norm", False),
     ).to(device)
 
+    sky_cfg = cfg.get("sky_loss", {})
+    use_sky_loss = bool(sky_cfg.get("enabled", False))
+    sky_class_ids: list[int] = sky_cfg.get("class_ids", []) or []
+    sky_class_ids = [int(c) for c in sky_class_ids]
+    sky_weight = float(sky_cfg.get("weight", sky_cfg.get("lambda", sky_cfg.get("lambda_sky", 0.0))))
+    sky_tv_weight = float(sky_cfg.get("tv_weight", 0.0))
+    sky_light_weight = float(sky_cfg.get("light_weight", sky_cfg.get("lambda_light", 0.0)))
+    sky_light_delta = float(sky_cfg.get("light_delta", 0.0))
+    sky_input_size = sky_cfg.get("seg_input_size")
+    if sky_input_size is not None:
+        sky_input_size = tuple(int(x) for x in sky_input_size)
+    seg_model = None
+
     if distributed:
-        ddp_kwargs = dict(device_ids=[device.index], output_device=device.index, find_unused_parameters=True)
+        ddp_kwargs = dict(device_ids=[device.index], output_device=device.index, find_unused_parameters=False)
         G = DDP(G, **ddp_kwargs)
         F = DDP(F, **ddp_kwargs)
         D_day = DDP(D_day, **ddp_kwargs)
@@ -280,6 +326,66 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
         F = nn.DataParallel(F)
         D_day = nn.DataParallel(D_day)
         D_night = nn.DataParallel(D_night)
+
+    if use_sky_loss:
+        seg_ckpt_spec = sky_cfg.get("seg_checkpoint") or "latest"
+        seg_ckpt = None
+        num_classes = int(sky_cfg.get("num_classes", 19) or 19)
+        sky_seg_filename = sky_cfg.get("seg_filename", "segnet_full.pth") or "segnet_full.pth"
+        experiments_root = cfg["logging"].get("out_dir", "experiments")
+        sky_run_prefix = sky_cfg.get("seg_run_prefix", "seg") or "seg"
+        if not sky_class_ids:
+            if is_main:
+                print("[SkyLoss] Disabled: sky_loss.class_ids is empty.")
+            use_sky_loss = False
+        else:
+            try:
+                seg_ckpt = resolve_encoder_checkpoint(
+                    seg_ckpt_spec,
+                    experiments_root=experiments_root,
+                    default_run_prefix=sky_run_prefix,
+                    filename=sky_seg_filename,
+                )
+            except FileNotFoundError:
+                if is_main:
+                    print(
+                        f"[SkyLoss] Disabled: no seg checkpoint found for spec='{seg_ckpt_spec}' "
+                        f"(pattern {sky_run_prefix}_*/{sky_seg_filename})."
+                    )
+                use_sky_loss = False
+            if use_sky_loss:
+                if is_main:
+                    print(f"[SkyLoss] Using seg checkpoint: {seg_ckpt}")
+                seg_model = SegNet9ResUNet(num_classes=num_classes).to(device)
+                try:
+                    state = torch.load(seg_ckpt, map_location="cpu")
+                    if not isinstance(state, dict):
+                        raise RuntimeError("Checkpoint must be a state_dict or dict with 'state_dict'.")
+                    state_dict = state["state_dict"] if "state_dict" in state else state
+                    if state_dict and all(k.startswith("module.") for k in state_dict):
+                        state_dict = {k.replace("module.", "", 1): v for k, v in state_dict.items()}
+                    missing, unexpected = seg_model.load_state_dict(state_dict, strict=False)
+                    if missing:
+                        raise RuntimeError(
+                            f"Missing keys when loading seg checkpoint (need full encoder+decoder): {missing[:5]}"
+                        )
+                    if unexpected and is_main:
+                        print(f"[SkyLoss] Loaded seg checkpoint with unexpected={unexpected}")
+                except Exception as exc:  # noqa: BLE001
+                    if is_main:
+                        print(f"[SkyLoss] Disabled: failed to load seg checkpoint ({exc}).")
+                    seg_model = None
+                    use_sky_loss = False
+                else:
+                    seg_model.eval()
+                    for p in seg_model.parameters():
+                        p.requires_grad = False
+                    if is_main:
+                        print(
+                            f"[SkyLoss] Enabled: classes={sky_class_ids}, weight={sky_weight}, "
+                            f"tv_weight={sky_tv_weight}, light_weight={sky_light_weight}, "
+                            f"light_delta={sky_light_delta}, ckpt={seg_ckpt}"
+                        )
 
     gan_loss = GANLoss().to(device)
     l1_loss = nn.L1Loss()
@@ -310,20 +416,28 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
     log_every = cfg["logging"].get("log_interval", 50)
 
     config_filename = os.path.basename(cfg_path)
-    if distributed:
+    if resume_ckpt:
+        exp_dir = os.path.abspath(os.path.join(resume_ckpt, os.pardir))
+        results_dir = cfg["logging"].get("results_dir", "results")
         if is_main:
+            print(f"[Resume] Using existing run directory: {exp_dir}")
+        if distributed:
+            exp_dir, results_dir = broadcast_dirs(exp_dir, results_dir)
+    else:
+        if distributed:
+            if is_main:
+                exp_dir, results_dir = make_run_dirs(cfg)
+                shutil.copy(cfg_path, os.path.join(exp_dir, config_filename))
+            else:
+                exp_dir = results_dir = None
+            exp_dir, results_dir = broadcast_dirs(exp_dir, results_dir)
+        else:
             exp_dir, results_dir = make_run_dirs(cfg)
             shutil.copy(cfg_path, os.path.join(exp_dir, config_filename))
-        else:
-            exp_dir = results_dir = None
-        exp_dir, results_dir = broadcast_dirs(exp_dir, results_dir)
-    else:
-        exp_dir, results_dir = make_run_dirs(cfg)
-        shutil.copy(cfg_path, os.path.join(exp_dir, config_filename))
     loss_log_path = os.path.join(exp_dir, "loss_log.txt")
 
-    scaler_G = GradScaler(enabled=use_amp)
-    scaler_D = GradScaler(enabled=use_amp)
+    scaler_G = amp.GradScaler(amp_device, enabled=use_amp)
+    scaler_D = amp.GradScaler(amp_device, enabled=use_amp)
     pool_size = cfg["train"].get("image_pool_size", 50)
     fake_day_pool = ImagePool(pool_size)
     fake_night_pool = ImagePool(pool_size)
@@ -336,7 +450,21 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
                     fh.write(f"{path}\n")
             print(f"Saved list of {len(dataset.paths)} {domain} images to {filelist_path}")
 
-    for epoch in range(1, epochs + 1):
+    start_epoch = 1
+    if resume_ckpt:
+        state = torch.load(resume_ckpt, map_location="cpu")
+        target = lambda m: m.module if isinstance(m, (nn.DataParallel, DDP)) else m
+        target(G).load_state_dict(state["G"])
+        target(F).load_state_dict(state["F"])
+        target(D_day).load_state_dict(state["D_day"])
+        target(D_night).load_state_dict(state["D_night"])
+        opt_G.load_state_dict(state["opt_G"])
+        opt_D.load_state_dict(state["opt_D"])
+        start_epoch = int(state.get("epoch", 0)) + 1
+        if is_main:
+            print(f"[Resume] Loaded checkpoint {resume_ckpt}, restarting from epoch {start_epoch}.")
+
+    for epoch in range(start_epoch, epochs + 1):
         set_linear_lr(opt_G, gen_lr, epoch, decay_start, epochs)
         set_linear_lr(opt_D, disc_lr, epoch, decay_start, epochs)
         if day_sampler:
@@ -369,7 +497,7 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
             # --- Train discriminators ---
             opt_D.zero_grad(set_to_none=True)
 
-            with autocast(enabled=use_amp):
+            with amp.autocast(device_type=amp_device, enabled=use_amp):
                 fake_night = G(day).detach()
                 fake_day = F(night).detach()
                 fake_night_buf = fake_night_pool.query(fake_night)
@@ -389,7 +517,7 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
             # --- Train generators ---
             opt_G.zero_grad(set_to_none=True)
 
-            with autocast(enabled=use_amp):
+            with amp.autocast(device_type=amp_device, enabled=use_amp):
                 fake_night = G(day)
                 fake_day = F(night)
 
@@ -403,7 +531,43 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
                 id_night = G(night)
                 id_loss = l1_loss(id_day, day) + l1_loss(id_night, night)
 
+                sky_loss_term = fake_night.new_zeros(())
+                sky_tv_term = fake_night.new_zeros(())
+                sky_light_term = fake_night.new_zeros(())
+                if use_sky_loss and seg_model is not None:
+                    with torch.no_grad(), amp.autocast(device_type=amp_device, enabled=False):
+                        seg_in = day
+                        if sky_input_size is not None:
+                            seg_in = Fnn.interpolate(
+                                seg_in,
+                                size=sky_input_size,
+                                mode="bilinear",
+                                align_corners=False,
+                            )
+                        seg_logits = seg_model(seg_in)
+                        seg_pred = seg_logits.argmax(dim=1)
+                        mask = torch.zeros_like(seg_pred, dtype=torch.float32)
+                        for cid in sky_class_ids:
+                            if cid < 0:
+                                continue
+                            mask = mask + (seg_pred == cid).float()
+                        mask = mask.clamp(max=1.0)
+                        sky_mask = Fnn.interpolate(mask.unsqueeze(1), size=fake_night.shape[2:], mode="nearest")
+                        sky_mask = sky_mask.to(dtype=fake_night.dtype)
+                    if torch.any(sky_mask):
+                        sky_loss_term = ((fake_night - day).abs() * sky_mask).mean()
+                        if sky_tv_weight > 0.0:
+                            sky_tv_term = total_variation_loss(fake_night * sky_mask)
+                        if sky_light_weight > 0.0:
+                            fake_gray = fake_night.mean(dim=1, keepdim=True)
+                            day_gray = day.mean(dim=1, keepdim=True)
+                            excess = (fake_gray - day_gray - sky_light_delta).clamp(min=0.0)
+                            sky_light_term = (excess * sky_mask).mean()
+
                 total_g = adv_loss + lambda_cycle * cycle_loss + lambda_id * id_loss
+                if use_sky_loss and seg_model is not None:
+                    total_g = total_g + sky_weight * sky_loss_term + sky_tv_weight * sky_tv_term
+                    total_g = total_g + sky_light_weight * sky_light_term
             scaler_G.scale(total_g).backward()
             scaler_G.step(opt_G)
             scaler_G.update()
@@ -413,21 +577,30 @@ def train(cfg_path: str = "configs/cyclegan.yaml"):
                 "g_adv": adv_loss.item(),
                 "g_cycle": cycle_loss.item(),
                 "g_id": id_loss.item(),
+                "g_sky": (
+                    sky_weight * sky_loss_term + sky_tv_weight * sky_tv_term + sky_light_weight * sky_light_term
+                ).item()
+                if use_sky_loss and seg_model is not None
+                else 0.0,
                 "d_total": loss_d.item(),
             }
             meters.update(batch_losses, bsz)
 
             if is_main and (step + 1) % log_every == 0 and hasattr(iterator, "set_postfix"):
                 avg_local = meters.average(samples)
-                iterator.set_postfix({k: f"{v:.4f}" for k, v in avg_local.items()})
+                postfix = {k: f"{v:.4f}" for k, v in avg_local.items()}
+                if not use_sky_loss:
+                    postfix.pop("g_sky", None)
+                iterator.set_postfix(postfix)
 
         avg_all, _ = sync_meter_totals(meters, samples, device, distributed)
         if is_main:
-            msg = (
-                f"[{epoch}/{epochs}] "
-                f"D={avg_all['d_total']:.4f} G={avg_all['g_total']:.4f} "
-                f"(adv={avg_all['g_adv']:.4f}, cycle={avg_all['g_cycle']:.4f}, id={avg_all['g_id']:.4f})"
+            detail = (
+                f"adv={avg_all['g_adv']:.4f}, cycle={avg_all['g_cycle']:.4f}, id={avg_all['g_id']:.4f}"
             )
+            if use_sky_loss:
+                detail += f", sky={avg_all['g_sky']:.4f}"
+            msg = f"[{epoch}/{epochs}] D={avg_all['d_total']:.4f} G={avg_all['g_total']:.4f} ({detail})"
             print(msg)
             with open(loss_log_path, "a") as log_f:
                 log_f.write(msg + "\n")
@@ -456,5 +629,9 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", "-c", default="configs/cyclegan.yaml")
+    parser.add_argument(
+        "--resume",
+        help="Path to epoch_xxxx.pt to resume training (overrides train.resume_checkpoint in config).",
+    )
     args = parser.parse_args()
-    train(args.config)
+    train(args.config, resume=args.resume)

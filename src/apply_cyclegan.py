@@ -7,29 +7,37 @@ from typing import Iterable, Sequence
 import torch
 from PIL import Image
 from torchvision import transforms
+from torchvision.transforms import InterpolationMode
 
 from src.models.cyclegan import CycleGANGenerator
-from src.utils.common import load_cfg
+from src.utils.common import load_cfg, resolve_encoder_checkpoint
 
 SUPPORTED_EXTENSIONS: Sequence[str] = ("jpg", "jpeg", "png", "bmp", "tif", "tiff")
 
 
 def build_inference_transform(cfg: dict) -> transforms.Compose:
+    tf_cfg = cfg.get("transforms", {})
+    resize = tf_cfg.get("resize")
+    center_crop = tf_cfg.get("center_crop")
     ops: list = []
-    tcfg = cfg.get("transforms", {})
-    center_crop = tcfg.get("center_crop")
-    if center_crop:
-        ops.append(transforms.CenterCrop(center_crop))
-    resize = tcfg.get("resize")
     if resize:
-        ops.append(transforms.Resize((resize, resize), antialias=True))
+        if not isinstance(resize, int):
+            raise ValueError("transforms.resize must be a single int (shorter side) to keep aspect ratio.")
+        ops.append(transforms.Resize(resize, interpolation=InterpolationMode.BICUBIC, antialias=True))
+    if center_crop:
+        if not isinstance(center_crop, int):
+            raise ValueError("transforms.center_crop must be a single int for square crops.")
+        ops.append(transforms.CenterCrop((center_crop, center_crop)))
     ops.extend(
         [
             transforms.ToTensor(),
             transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
         ]
     )
-    return transforms.Compose(ops)
+    transform = transforms.Compose(ops)
+    # Keep attribute for compatibility with downstream checks; None means handled inside the transform.
+    setattr(transform, "expected_size", None)
+    return transform
 
 
 def gather_image_paths(root: Path, extensions: Sequence[str]) -> list[Path]:
@@ -60,16 +68,29 @@ def find_checkpoint(checkpoint: str | None, cfg: dict) -> Path:
     return candidates[-1]
 
 
-def build_generator(cfg: dict, device: torch.device) -> CycleGANGenerator:
+def build_generator(cfg: dict, device: torch.device, direction: str) -> CycleGANGenerator:
     gen_cfg = cfg["model"]["generator"]
+    encoder_ckpt = resolve_encoder_checkpoint(
+        gen_cfg.get("encoder_checkpoint"),
+        experiments_root=cfg["logging"].get("out_dir", "experiments"),
+        default_run_prefix=gen_cfg.get("encoder_run_prefix", "seg"),
+        filename=gen_cfg.get("encoder_filename", "encoder_GE.pth"),
+    )
+    # Paper setup: only G (day->night) reuses and freezes the segmentation encoder.
+    use_encoder = direction == "day2night"
+    encoder_for_direction = encoder_ckpt if use_encoder else None
+    freeze_encoder = gen_cfg.get("freeze_encoder", False) if use_encoder else False
+    print(
+        f"Building {direction} generator | encoder: {encoder_for_direction or 'None'} | freeze={freeze_encoder}"
+    )
     return CycleGANGenerator(
         in_channels=gen_cfg.get("in_channels", 3),
         out_channels=gen_cfg.get("out_channels", 3),
         base_channels=gen_cfg.get("base_channels", 64),
         n_res_blocks=gen_cfg.get("n_res_blocks", 9),
         use_skip=gen_cfg.get("use_skip", True),
-        encoder_checkpoint=gen_cfg.get("encoder_checkpoint"),
-        freeze_encoder=gen_cfg.get("freeze_encoder", False),
+        encoder_checkpoint=encoder_for_direction,
+        freeze_encoder=freeze_encoder,
         decoder_res_blocks=gen_cfg.get("decoder_res_blocks", 3),
     ).to(device)
 
@@ -161,8 +182,8 @@ def main() -> None:
         raise RuntimeError(f"No images found in {input_dir} with extensions {extensions}")
 
     output_dir = Path(args.output_dir) / args.direction
-    generator = build_generator(cfg, device)
-    state = torch.load(checkpoint, map_location="cpu")
+    generator = build_generator(cfg, device, args.direction)
+    state = torch.load(checkpoint, map_location="cpu", weights_only=True)
     key = "G" if args.direction == "day2night" else "F"
     generator.load_state_dict(state[key])
 

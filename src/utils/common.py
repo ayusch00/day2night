@@ -1,4 +1,5 @@
 import yaml, torch, random, numpy as np, os, time
+from pathlib import Path
 
 def load_cfg(path): return yaml.safe_load(open(path))
 def set_seed(s):
@@ -10,3 +11,48 @@ def make_run_dirs(cfg):
     res_dir = cfg["logging"]["results_dir"]
     os.makedirs(exp_dir, exist_ok=True); os.makedirs(res_dir, exist_ok=True)
     return exp_dir, res_dir
+
+def resolve_encoder_checkpoint(
+    spec,
+    experiments_root="experiments",
+    default_run_prefix="seg",
+    filename="encoder_GE.pth",
+):
+    """
+    Resolve the encoder checkpoint path.
+
+    spec may be:
+        - None/empty: returns None (no checkpoint)
+        - Path to a .pth file
+        - Directory that contains filename (defaults to encoder_GE.pth)
+        - "latest" / "auto": pick the newest experiments/{default_run_prefix}_*/filename
+        - "latest:<pattern>": glob pattern relative to experiments_root (e.g. "seg_cityscapes_*")
+    """
+    if not spec:
+        return None
+    spec = str(spec)
+    base = Path(experiments_root)
+    def latest(pattern):
+        if not base.exists():
+            raise FileNotFoundError(f"Experiments root not found: {base}")
+        pat = pattern or f"{default_run_prefix}_*"
+        candidates = sorted(
+            (p for p in base.glob(f"{pat}/{filename}") if p.is_file()),
+            key=lambda p: p.stat().st_mtime,
+        )
+        if not candidates:
+            raise FileNotFoundError(f"No encoder checkpoints found for pattern '{pat}' under {base}")
+        return candidates[-1]
+
+    if spec in {"latest", "auto"}:
+        return str(latest(None))
+    if spec.startswith("latest:"):
+        _, _, pattern = spec.partition(":")
+        return str(latest(pattern.strip() or None))
+
+    path = Path(spec).expanduser()
+    if path.is_dir():
+        path = path / filename
+    if path.is_file():
+        return str(path)
+    raise FileNotFoundError(f"Encoder checkpoint not found: {path}")

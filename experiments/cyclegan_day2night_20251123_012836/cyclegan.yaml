@@ -1,0 +1,62 @@
+exp_name: cyclegan_day2night
+
+data:
+  #day_dir: data/bdd_split/cyclegan/trainA
+  #night_dir: data/bdd_split/cyclegan/trainB
+  day_dir: data/bdd_kaggle_labels/bdd100k/bdd100k/images/100k/train/trainA
+  night_dir: data/bdd_kaggle_labels/bdd100k/bdd100k/images/100k/train/trainB
+  extensions: ["jpg", "jpeg", "png"]
+  sample_limit: 2000
+
+transforms:
+  resize: 256
+  random_crop: 512
+  center_crop: 512
+  random_flip: true
+
+model:
+  generator:
+    in_channels: 3
+    out_channels: 3
+    base_channels: 64
+    n_res_blocks: 9
+    use_skip: true
+    encoder_checkpoint: latest
+    #encoder_checkpoint: latest:seg_cityscapes_*   # optional glob override
+    #encoder_checkpoint: experiments/custom_run/encoder_GE.pth
+    #encoder_checkpoint: experiments/seg_cityscapes_1k_encoder_GE.pth
+    freeze_encoder: true
+    decoder_res_blocks: 3
+  discriminator:
+    in_channels: 3
+    base_channels: 64
+    n_layers: 3
+    max_channels: 512
+    use_spectral_norm: false
+
+loss:
+  lambda_cycle: 10.0
+  lambda_identity: 5.0
+
+optim:
+  generator:
+    lr: 2.0e-4
+    betas: [0.5, 0.999]
+  discriminator:
+    lr: 1.0e-4
+    betas: [0.5, 0.999]
+
+train:
+  epochs: 200
+  batch_size: 1
+  workers: 4
+  seed: 42
+  lr_decay_start: 100
+  amp: true
+  image_pool_size: 50
+
+logging:
+  out_dir: experiments
+  results_dir: results
+  save_every: 10
+  log_interval: 100

@@ -20,3 +20,4 @@ scipy==1.13.1
 cityscapesscripts
 tqdm
 ipykernel
+monai

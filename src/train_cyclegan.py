@@ -30,9 +30,12 @@ def build_transform(cfg: dict) -> transforms.Compose:
     ops: list = []
     resize = cfg.get("resize")
     if resize:
-        if not isinstance(resize, int):
-            raise ValueError("transforms.resize must be a single int (shorter side) to keep aspect ratio.")
-        ops.append(transforms.Resize(resize, interpolation=InterpolationMode.BICUBIC, antialias=True))
+        if isinstance(resize, int):
+            ops.append(transforms.Resize(resize, interpolation=InterpolationMode.BICUBIC, antialias=True))
+        elif isinstance(resize, (list, tuple)) and len(resize) == 2 and all(isinstance(x, int) for x in resize):
+            ops.append(transforms.Resize(tuple(resize), interpolation=InterpolationMode.BICUBIC, antialias=True))
+        else:
+            raise ValueError("transforms.resize must be an int (shorter side) or a tuple/list of two ints (h, w).")
     crop = cfg.get("random_crop")
     if crop:
         if not isinstance(crop, int):

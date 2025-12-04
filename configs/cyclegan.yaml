@@ -11,9 +11,9 @@ data:
   sample_limit: 2000
 
 transforms:
-  resize: 572
-  random_crop: 512
-  center_crop: 512
+  resize: [512, 512]      # resize the full image to 512x512 (no cropping)
+  random_crop: null
+  center_crop: null
   random_flip: true
 
 model:

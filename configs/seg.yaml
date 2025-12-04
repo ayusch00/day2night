@@ -46,8 +46,8 @@ model:
   n_resblocks: 9
 
 transforms:
-  crop: 512
-  resize: 572
+  crop: null
+  resize: [512, 512]   # resize full image to 512x512 without cropping
   hflip: true
 
 logging:

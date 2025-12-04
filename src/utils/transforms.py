@@ -11,12 +11,15 @@ class SegPairTransform:
         split = split.lower()
         if split not in {"train", "val", "test"}:
             raise ValueError(f"Unsupported split '{split}' for segmentation transforms.")
-        if not isinstance(resize, int):
-            raise ValueError("resize must be a single int (shorter side) to keep aspect ratio.")
-        if not isinstance(crop, int):
-            raise ValueError("crop must be a single int to enforce square crops.")
+        if isinstance(resize, int):
+            self.resize = resize
+        elif isinstance(resize, (list, tuple)) and len(resize) == 2 and all(isinstance(x, int) for x in resize):
+            self.resize = tuple(resize)
+        else:
+            raise ValueError("resize must be an int (shorter side) or a tuple/list of two ints (h, w).")
+        if crop is not None and not isinstance(crop, int):
+            raise ValueError("crop must be a single int for square crops or null to disable cropping.")
         self.split = split
-        self.resize = resize
         self.crop = crop
         self.hflip = hflip and split == "train"
 
@@ -26,6 +29,8 @@ class SegPairTransform:
         return img, mask
 
     def _crop(self, img, mask):
+        if self.crop is None:
+            return img, mask
         if self.split == "train":
             i, j, h, w = T.RandomCrop.get_params(img, (self.crop, self.crop))
             img = F.crop(img, i, j, h, w)
@@ -53,7 +58,7 @@ class SegPairTransform:
 
 def make_transforms(split, crop=512, resize=572, hflip=True):
     """
-    Resize shorter side -> crop -> optional flip -> [-1,1] norm.
-    Returns a callable that receives (img, mask) and returns aligned tensors without distorting aspect ratio.
+    Resize -> optional crop -> optional flip -> [-1,1] norm.
+    Accepts integer resize (keeps aspect ratio) or (h, w) tuple for absolute sizing.
     """
     return SegPairTransform(split, resize, crop, hflip)

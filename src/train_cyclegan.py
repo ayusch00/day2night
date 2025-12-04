@@ -352,6 +352,8 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
                     )
                 use_sky_loss = False
             if use_sky_loss:
+                if is_main:
+                    print(f"[SkyLoss] Using seg checkpoint: {seg_ckpt}")
                 seg_model = SegNet9ResUNet(num_classes=num_classes).to(device)
                 try:
                     state = torch.load(seg_ckpt, map_location="cpu")

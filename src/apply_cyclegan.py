@@ -21,9 +21,14 @@ def build_inference_transform(cfg: dict) -> transforms.Compose:
     center_crop = tf_cfg.get("center_crop")
     ops: list = []
     if resize:
-        if not isinstance(resize, int):
-            raise ValueError("transforms.resize must be a single int (shorter side) to keep aspect ratio.")
-        ops.append(transforms.Resize(resize, interpolation=InterpolationMode.BICUBIC, antialias=True))
+        if isinstance(resize, int):
+            resize_arg = resize
+        elif isinstance(resize, (list, tuple)) and len(resize) == 2 and all(isinstance(x, int) for x in resize):
+            resize_arg = tuple(resize)
+        else:
+            raise ValueError("transforms.resize must be an int (shorter side) or a tuple/list of two ints (h, w).")
+        # torchvision Resize handles both scalar (shorter side) and explicit (h, w)
+        ops.append(transforms.Resize(resize_arg, interpolation=InterpolationMode.BICUBIC, antialias=True))
     if center_crop:
         if not isinstance(center_crop, int):
             raise ValueError("transforms.center_crop must be a single int for square crops.")

@@ -46,8 +46,8 @@ model:
   n_resblocks: 9
 
 transforms:
-  crop: null
-  resize: [512, 512]   # resize full image to 512x512 without cropping
+  crop: 256             # train on random 256x256 patches
+  resize: null          # no global resize; sample patches from full-res images
   hflip: true
 
 logging:

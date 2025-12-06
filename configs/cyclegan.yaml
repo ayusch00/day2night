@@ -11,8 +11,8 @@ data:
   sample_limit: 2000
 
 transforms:
-  resize: [512, 512]      # resize the full image to 512x512 (no cropping)
-  random_crop: null
+  resize: null            # disable global resize; keep full-res and sample patches instead
+  random_crop: 256        # train on random 256x256 patches from the original image
   center_crop: null
   random_flip: true
 

@@ -1,8 +1,8 @@
 exp_name: "seg"
 
 data:
-  root: "data/bdd_split"
-  dataset: bdd100k #"bdd100k"  # use "cityscapes" for default mapping logic
+  root: "data/cityscapes"
+  dataset: cityscapes #"bdd100k"  # use "cityscapes" for default mapping logic
   extensions: ["jpg", "jpeg", "png"]
   #train_images: "data/bdd_split/segnet/trainA"
   #train_masks:  "data/bdd_split/segnet/trainA_mask"

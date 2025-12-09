@@ -1,6 +1,6 @@
 /.venv
 /data
-/results
+#/results
 /cityscapes_1k
 #/experiments
 epoch_*.pt

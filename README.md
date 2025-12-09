@@ -102,3 +102,6 @@ torchrun --nproc_per_node=8 -m src.train_cyclegan --config configs/cyclegan.yaml
 
 
 torchrun --nproc_per_node=8 -m src.train_cyclegan --config configs/cyclegan.yaml --resume experiments/cyclegan_day2night_20251204_184245/epoch_0020.pt
+
+CUDA_VISIBLE_DEVICES=0,1,2 torchrun --nproc_per_node=3 -m src.train_seg --config configs/seg.yaml
+CUDA_VISIBLE_DEVICES=3,4,6,7 torchrun --nproc_per_node=4 -m src.train_cyclegan --config configs/cyclegan.yaml

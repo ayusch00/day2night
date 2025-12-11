@@ -100,9 +100,18 @@ def build_generator(cfg: dict, device: torch.device, direction: str) -> CycleGAN
     ).to(device)
 
 
-def tensor_to_pil(tensor: torch.Tensor) -> Image.Image:
+def tensor_to_pil(tensor: torch.Tensor, brightness_gain: float = 1.0, output_gamma: float = 1.0) -> Image.Image:
     tensor = tensor.squeeze(0).cpu().detach()
-    tensor = tensor.mul(0.5).add(0.5).clamp(0.0, 1.0)
+    tensor = tensor.mul(0.5).add(0.5)
+
+    if brightness_gain != 1.0:
+        tensor = tensor * brightness_gain
+
+    if output_gamma != 1.0:
+        # gamma > 1 brightens (pow with exponent < 1); gamma < 1 darkens.
+        tensor = tensor.clamp(0.0, 1.0).pow(1.0 / output_gamma)
+
+    tensor = tensor.clamp(0.0, 1.0)
     return transforms.ToPILImage()(tensor)
 
 
@@ -113,6 +122,8 @@ def apply_generator(
     output_dir: Path,
     input_root: Path,
     device: torch.device,
+    brightness_gain: float = 1.0,
+    output_gamma: float = 1.0,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     generator.eval()
@@ -121,7 +132,7 @@ def apply_generator(
             img = Image.open(image_path).convert("RGB")
             input_tensor = transform(img).unsqueeze(0).to(device)
             output_tensor = generator(input_tensor)
-            result_img = tensor_to_pil(output_tensor)
+            result_img = tensor_to_pil(output_tensor, brightness_gain=brightness_gain, output_gamma=output_gamma)
             rel_path = image_path.relative_to(input_root)
             destination = output_dir / rel_path
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -177,6 +188,14 @@ def main() -> None:
         else cfg["data"].get("extensions", SUPPORTED_EXTENSIONS)
     )
 
+    inference_cfg = cfg.get("inference", {})
+    brightness_gain = float(inference_cfg.get("brightness_gain", 1.0))
+    output_gamma = float(inference_cfg.get("output_gamma", 1.0))
+    if brightness_gain <= 0:
+        raise ValueError("inference.brightness_gain must be > 0.")
+    if output_gamma <= 0:
+        raise ValueError("inference.output_gamma must be > 0.")
+
     default_inputs = {
         "day2night": Path("data/night2day/night_to_day/testA"),
         "night2day": Path("data/night2day/night_to_day/testB"),
@@ -193,7 +212,16 @@ def main() -> None:
     generator.load_state_dict(state[key])
 
     print(f"Using checkpoint {checkpoint} to convert {len(image_paths)} images from {input_dir}")
-    apply_generator(generator, image_paths, transform, output_dir, input_dir, device)
+    apply_generator(
+        generator,
+        image_paths,
+        transform,
+        output_dir,
+        input_dir,
+        device,
+        brightness_gain=brightness_gain,
+        output_gamma=output_gamma,
+    )
 
 
 if __name__ == "__main__":

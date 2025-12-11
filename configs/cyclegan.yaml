@@ -12,7 +12,7 @@ data:
   #day_dir: data/night2day/night_to_day/trainA
   #night_dir: data/night2day/night_to_day/trainB
   extensions: ["jpg", "jpeg", "png"]
-  sample_limit: 1500
+  sample_limit: 2000
 
 transforms:
   resize: [512, 512]
@@ -29,7 +29,7 @@ model:
     use_skip: true
     #encoder_checkpoint: latest
     #encoder_checkpoint: latest:seg_cityscapes_*   # optional glob override
-    encoder_checkpoint: experiments/seg_20251207_042301/encoder_GE.pth
+    encoder_checkpoint: experiments/seg_20251204_174637/encoder_GE.pth
     freeze_encoder: true
     decoder_res_blocks: 3
   discriminator:
@@ -70,6 +70,10 @@ train:
   lr_decay_start: 100
   amp: true
   image_pool_size: 50
+
+inference:
+  brightness_gain: 1.0    # >1.0 hellt Ergebnisse auf, <1.0 dunkelt ab.
+  output_gamma: 1.0       # >1.0 hellt (Gamma-Korrektur), <1.0 dunkelt. Wird nach brightness_gain angewandt.
 
 logging:
   out_dir: experiments

@@ -80,6 +80,7 @@ Weitere Optionen:
 
 - `--config`: Pfad zur Konfigurationsdatei (Standard `configs/cyclegan.yaml`).
 - `--extensions`: Erweiterungen, die durchsucht werden sollen (Standard aus der Konfiguration oder `jpg/jpeg/png/...`).
+- Helligkeit steuern: In `configs/cyclegan.yaml` unter `inference` kannst du `brightness_gain` (linear, z. B. 1.15) und `output_gamma` (Gamma-Korrektur, z. B. 1.1) setzen, um Day→Night‑Ergebnisse aufzuhellen. Beide sind standardmäßig 1.0 (keine Änderung).
 
 Der angegebene `--root` sollte direkt die Unterordner `images/` und `labels/` enthalten. Liegen keine `labels/bdd100k_labels_images_*.json` (mit `attributes.timeofday`) vor, kannst du mit `--heuristic` eine simple Helligkeits-Heuristik nutzen (optional `--threshold`, z. B. `0.5`). Mit `--copy` anstelle von Symlinks werden echte Dateien erzeugt.
 

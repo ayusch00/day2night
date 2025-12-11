@@ -23,7 +23,7 @@ data:
 
 train:
   epochs: 200
-  batch_size: 4
+  batch_size: 8
   seed: 42
   workers: 4
   amp: true
@@ -48,7 +48,7 @@ model:
 transforms:
   crop: null
   resize: [512, 512]
-  hflip: false
+  hflip: true
 
 logging:
   save_every: 5

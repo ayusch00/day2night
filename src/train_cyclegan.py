@@ -415,7 +415,7 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
     epochs = cfg["train"]["epochs"]
     decay_start = cfg["train"].get("lr_decay_start", epochs // 2)
     steps_per_epoch = max(len(day_loader), len(night_loader))
-    save_every = cfg["logging"].get("save_every", 10)
+    save_every = cfg["logging"].get("save_every", 40)
     log_every = cfg["logging"].get("log_interval", 50)
 
     config_filename = os.path.basename(cfg_path)

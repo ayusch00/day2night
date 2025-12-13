@@ -12,7 +12,7 @@ data:
   #day_dir: data/night2day/night_to_day/trainA
   #night_dir: data/night2day/night_to_day/trainB
   extensions: ["jpg", "jpeg", "png"]
-  sample_limit: 2000
+  sample_limit: 1000
 
 transforms:
   resize: [512, 512]
@@ -41,14 +41,14 @@ model:
 
 loss:
   lambda_cycle: 10.0
-  lambda_identity: 3.5
+  lambda_identity: 4
 
 sky_loss:
   enabled: False            # Set to true to penalize new lights in sky/trees for day->night.
   weight: 3.0                # L1 weight between fake_night and day inside the sky mask.
   tv_weight: 0.0            # Optional TV smoothing inside the sky mask.
   light_weight: 5.0          # Penalize over-brightening in sky regions (0 to disable).
-  light_delta: 0.2           # Allow fake sky to be this much brighter before the penalty kicks in.
+  light_delta: 0.07           # Allow fake sky to be this much brighter before the penalty kicks in.
   class_ids: [10, 8]         # e.g. Cityscapes IDs for sky=10, vegetation=8. Adjust to your labels.
   num_classes: 19            # Number of classes in the seg model (needed to build the head).
   seg_checkpoint: null       # Path to a full SegNet checkpoint; null/"latest" auto-picks newest segnet_full.pth.
@@ -78,5 +78,5 @@ inference:
 logging:
   out_dir: experiments
   results_dir: results
-  save_every: 40
+  save_every: 10
   log_interval: 100

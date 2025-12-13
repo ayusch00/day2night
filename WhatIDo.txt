@@ -1,0 +1,4 @@
+- post processing mit gamma und helligkeit in cyclegan ymal
+- fixed fh_nacht durch 180 drehnung und transofrmation der rotation weil CycleGAN ignoriert den EXIF-Orientation-Tag. Wenn du willst, dass es das gedrehte Bild benutzt, musst du die Pixel dauerhaft drehen und den Tag auf 1 (oder entfernen) setzen.
+- segemntierungnetzwerk angucjen und notbok darauf sehen wie gut es auf nacht und tag bilder erntsteht
+- watch auf GPUS 

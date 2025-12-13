@@ -437,7 +437,14 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
         else:
             exp_dir, results_dir = make_run_dirs(cfg)
             shutil.copy(cfg_path, os.path.join(exp_dir, config_filename))
+    if is_main:
+        # Ensure run dirs exist before any logging occurs.
+        os.makedirs(exp_dir, exist_ok=True)
+        os.makedirs(results_dir, exist_ok=True)
     loss_log_path = os.path.join(exp_dir, "loss_log.txt")
+    if is_main and not os.path.exists(loss_log_path):
+        with open(loss_log_path, "w") as log_f:
+            log_f.write("")
 
     scaler_G = amp.GradScaler(amp_device, enabled=use_amp)
     scaler_D = amp.GradScaler(amp_device, enabled=use_amp)

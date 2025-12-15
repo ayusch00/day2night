@@ -1,4 +1,5 @@
 import glob
+import math
 import os
 import random
 import shutil
@@ -170,6 +171,18 @@ def total_variation_loss(img: torch.Tensor) -> torch.Tensor:
     return loss_h + loss_w
 
 
+def gaussian_blur_tensor(img: torch.Tensor, ksize: int, sigma: float) -> torch.Tensor:
+    if sigma <= 0.0 or ksize <= 1:
+        return img
+    radius = ksize // 2
+    coords = torch.arange(ksize, device=img.device, dtype=img.dtype) - radius
+    kernel1d = torch.exp(-(coords ** 2) / (2 * sigma * sigma))
+    kernel1d = kernel1d / kernel1d.sum().clamp(min=1e-12)
+    kernel2d = torch.einsum("i,j->ij", kernel1d, kernel1d)
+    kernel2d = kernel2d.expand(img.shape[1], 1, ksize, ksize)
+    return Fnn.conv2d(img, kernel2d, padding=radius, groups=img.shape[1])
+
+
 class ImagePool:
     """Stores previously generated images to stabilize discriminator training."""
 
@@ -309,10 +322,11 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
     use_sky_loss = bool(sky_cfg.get("enabled", False))
     sky_class_ids: list[int] = sky_cfg.get("class_ids", []) or []
     sky_class_ids = [int(c) for c in sky_class_ids]
-    sky_weight = float(sky_cfg.get("weight", sky_cfg.get("lambda", sky_cfg.get("lambda_sky", 0.0))))
+    sky_grad_weight = float(sky_cfg.get("grad_weight", sky_cfg.get("weight", sky_cfg.get("lambda", sky_cfg.get("lambda_sky", 0.0)))))
+    sky_peak_weight = float(sky_cfg.get("peak_weight", sky_cfg.get("light_weight", sky_cfg.get("lambda_light", 0.0))))
+    sky_peak_sigma = float(sky_cfg.get("peak_sigma", 3.0))
+    sky_peak_delta = float(sky_cfg.get("peak_delta", sky_cfg.get("light_delta", 0.0)))
     sky_tv_weight = float(sky_cfg.get("tv_weight", 0.0))
-    sky_light_weight = float(sky_cfg.get("light_weight", sky_cfg.get("lambda_light", 0.0)))
-    sky_light_delta = float(sky_cfg.get("light_delta", 0.0))
     sky_input_size = sky_cfg.get("seg_input_size")
     if sky_input_size is not None:
         sky_input_size = tuple(int(x) for x in sky_input_size)
@@ -385,9 +399,10 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
                         p.requires_grad = False
                     if is_main:
                         print(
-                            f"[SkyLoss] Enabled: classes={sky_class_ids}, weight={sky_weight}, "
-                            f"tv_weight={sky_tv_weight}, light_weight={sky_light_weight}, "
-                            f"light_delta={sky_light_delta}, ckpt={seg_ckpt}"
+                            f"[SkyLoss] Enabled: classes={sky_class_ids}, "
+                            f"grad_weight={sky_grad_weight}, peak_weight={sky_peak_weight}, "
+                            f"peak_sigma={sky_peak_sigma}, peak_delta={sky_peak_delta}, "
+                            f"tv_weight={sky_tv_weight}, ckpt={seg_ckpt}"
                         )
 
     gan_loss = GANLoss().to(device)
@@ -541,9 +556,9 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
                 id_night = G(night)
                 id_loss = l1_loss(id_day, day) + l1_loss(id_night, night)
 
-                sky_loss_term = fake_night.new_zeros(())
+                sky_grad_term = fake_night.new_zeros(())
                 sky_tv_term = fake_night.new_zeros(())
-                sky_light_term = fake_night.new_zeros(())
+                sky_peak_term = fake_night.new_zeros(())
                 if use_sky_loss and seg_model is not None:
                     with torch.no_grad(), amp.autocast(device_type=amp_device, enabled=False):
                         seg_in = day
@@ -565,19 +580,35 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
                         sky_mask = Fnn.interpolate(mask.unsqueeze(1), size=fake_night.shape[2:], mode="nearest")
                         sky_mask = sky_mask.to(dtype=fake_night.dtype)
                     if torch.any(sky_mask):
-                        sky_loss_term = ((fake_night - day).abs() * sky_mask).mean()
+                        fake_gray = fake_night.mean(dim=1, keepdim=True)
+                        day_gray = day.mean(dim=1, keepdim=True)
+
+                        if sky_grad_weight > 0.0:
+                            grad_x_fake = fake_gray[:, :, :, 1:] - fake_gray[:, :, :, :-1]
+                            grad_x_day = day_gray[:, :, :, 1:] - day_gray[:, :, :, :-1]
+                            grad_y_fake = fake_gray[:, :, 1:, :] - fake_gray[:, :, :-1, :]
+                            grad_y_day = day_gray[:, :, 1:, :] - day_gray[:, :, :-1, :]
+                            grad_x_fake = Fnn.pad(grad_x_fake, (0, 1, 0, 0))
+                            grad_x_day = Fnn.pad(grad_x_day, (0, 1, 0, 0))
+                            grad_y_fake = Fnn.pad(grad_y_fake, (0, 0, 0, 1))
+                            grad_y_day = Fnn.pad(grad_y_day, (0, 0, 0, 1))
+                            grad_diff = (grad_x_fake - grad_x_day).abs() + (grad_y_fake - grad_y_day).abs()
+                            sky_grad_term = (grad_diff * sky_mask).mean()
+
+                        if sky_peak_weight > 0.0:
+                            sigma = max(sky_peak_sigma, 1e-4)
+                            ksize = int(max(3, math.ceil(sigma * 3) * 2 + 1))
+                            blurred = gaussian_blur_tensor(fake_gray, ksize, sigma)
+                            peaks = (fake_gray - blurred - sky_peak_delta).clamp(min=0.0)
+                            sky_peak_term = (peaks * sky_mask).mean()
+
                         if sky_tv_weight > 0.0:
                             sky_tv_term = total_variation_loss(fake_night * sky_mask)
-                        if sky_light_weight > 0.0:
-                            fake_gray = fake_night.mean(dim=1, keepdim=True)
-                            day_gray = day.mean(dim=1, keepdim=True)
-                            excess = (fake_gray - day_gray - sky_light_delta).clamp(min=0.0)
-                            sky_light_term = (excess * sky_mask).mean()
 
                 total_g = adv_loss + lambda_cycle * cycle_loss + lambda_id * id_loss
                 if use_sky_loss and seg_model is not None:
-                    total_g = total_g + sky_weight * sky_loss_term + sky_tv_weight * sky_tv_term
-                    total_g = total_g + sky_light_weight * sky_light_term
+                    total_g = total_g + sky_grad_weight * sky_grad_term + sky_peak_weight * sky_peak_term
+                    total_g = total_g + sky_tv_weight * sky_tv_term
             scaler_G.scale(total_g).backward()
             scaler_G.step(opt_G)
             scaler_G.update()
@@ -588,7 +619,7 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
                 "g_cycle": cycle_loss.item(),
                 "g_id": id_loss.item(),
                 "g_sky": (
-                    sky_weight * sky_loss_term + sky_tv_weight * sky_tv_term + sky_light_weight * sky_light_term
+                    sky_grad_weight * sky_grad_term + sky_peak_weight * sky_peak_term + sky_tv_weight * sky_tv_term
                 ).item()
                 if use_sky_loss and seg_model is not None
                 else 0.0,

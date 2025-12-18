@@ -4,6 +4,7 @@
 - watch auf GPUS 
 - ddp ind_unsused_parameters
 - ornder fh und bbd nacht mix
+-  3 decoder entfernt
 
 
 - bdd liste das es seg maske sucht und wenn es die nicht gibt rauswirfd aber es trz 2000 am ende gibt

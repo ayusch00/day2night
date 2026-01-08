@@ -5,7 +5,8 @@ data:
   #day_dir: data/bdd_kaggle_labels/bdd100k/bdd100k/images/100k/train/trainA
   day_dir: data/Straßen Bilder/train
   #day_dir: data/night2day/night_to_day/trainA
-  night_dir: data/bdd100k-weather-extreme-split/train/snowy
+  #night_dir: data/bdd100k-weather-extreme-split/train/snowy
+  night_dir: data/ACDC/rgb_anon/snow/allinone
   extensions: ["jpg", "jpeg", "png"]
   sample_limit: 1000
 

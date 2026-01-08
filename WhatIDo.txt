@@ -6,5 +6,8 @@
 - ornder fh und bbd nacht mix
 -  3 decoder entfernt
 
+- snow datensatz aus bbd also all weather split
+- hab mich für acdc entschieden aber musste das alles in einem packen weil nicht zu cviel bilder existieren
+
 
 - bdd liste das es seg maske sucht und wenn es die nicht gibt rauswirfd aber es trz 2000 am ende gibt

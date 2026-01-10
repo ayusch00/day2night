@@ -114,3 +114,5 @@ torchrun --nproc_per_node=4 --master_port=29503 -m src.train_seg --config config
 torchrun --nproc_per_node=4 --master_port=29503 -m src.train_cyclegan --config configs/cyclegan.yaml
 
 CUDA_VISIBLE_DEVICES=1,2,3,4 torchrun --nproc_per_node=4 --master_port=29503 -m src.train_cyclegan --config "configs/cyclegan snow.yaml" 
+
+CUDA_VISIBLE_DEVICES=2,4,5,6,7 torchrun --nproc_per_node=4 -m src.train_cyclegan --config configs/cyclegan.yaml

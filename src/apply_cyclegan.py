@@ -64,13 +64,24 @@ def find_checkpoint(checkpoint: str | None, cfg: dict) -> Path:
             raise FileNotFoundError(f"Checkpoint not found: {ckpt}")
         return ckpt
     exp_root = Path(cfg["logging"]["out_dir"])
-    pattern = exp_root.glob(f"{cfg['exp_name']}_*/epoch_*.pt")
-    candidates = sorted(pattern)
-    if not candidates:
-        raise RuntimeError(
-            f"No checkpoints found in {exp_root} for experiment prefix {cfg['exp_name']}_*"
-        )
-    return candidates[-1]
+    exp_prefix = cfg["exp_name"]
+    latest_candidates = sorted(exp_root.glob(f"{exp_prefix}_*/latest.pt"))
+    if latest_candidates:
+        return latest_candidates[-1]
+
+    best_candidates = sorted(exp_root.glob(f"{exp_prefix}_*/best.pt"))
+    if best_candidates:
+        return best_candidates[-1]
+
+    # Backward compatibility with older runs that saved epoch_XXXX checkpoints.
+    epoch_candidates = sorted(exp_root.glob(f"{exp_prefix}_*/epoch_*.pt"))
+    if epoch_candidates:
+        return epoch_candidates[-1]
+
+    raise RuntimeError(
+        f"No checkpoints found in {exp_root} for experiment prefix {exp_prefix}_* "
+        "(expected latest.pt, best.pt, or epoch_*.pt)."
+    )
 
 
 def build_generator(cfg: dict, device: torch.device, direction: str) -> CycleGANGenerator:
@@ -150,7 +161,7 @@ def main() -> None:
     parser.add_argument(
         "--checkpoint",
         "-k",
-        help="Path to a CycleGAN checkpoint (defaults to latest run of the configured experiment).",
+        help="Path to a CycleGAN checkpoint (defaults to latest.pt of the newest matching run).",
     )
     parser.add_argument(
         "--direction",

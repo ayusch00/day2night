@@ -63,14 +63,14 @@ python data/smallset_bdd.py --root data/bdd100k --n 1000
 Einfachere Eingabe‑/Ausgabe-Pfade und die Anwendung eines gespeicherten Generators bietet das neue Skript `src.apply_cyclegan`.
 
 1. Legt eure Eingabebilder in ein beliebiges Verzeichnis (z. B. `data/night2day/night_to_day/testA` für Tagesbilder oder `testB` für Nachtbilder).
-2. Gebt optional den Checkpoint an, sonst wird automatisch das jüngste `epoch_*.pt` aus `experiments/{exp_name}_*/` geladen.
+2. Gebt optional den Checkpoint an, sonst wird automatisch das jüngste `latest.pt` aus `experiments/{exp_name}_*/` geladen (Fallback: `best.pt`, dann `epoch_*.pt`).
 3. Führt z. B. aus:
 
    ```bash
    python -m src.apply_cyclegan \
      --direction day2night \
      --input-dir data/night2day/night_to_day/testA \
-     --checkpoint experiments/cyclegan_day2night_20251110_163433/epoch_0120.pt \
+     --checkpoint experiments/cyclegan_day2night_20251110_163433/best.pt \
      --output-dir results/cyclegan_inference
    ```
 
@@ -102,10 +102,10 @@ torchrun --nproc_per_node=8 -m src.train_seg --config configs/seg.yaml
 torchrun --nproc_per_node=8 -m src.train_cyclegan --config configs/cyclegan.yaml
 
 
-torchrun --nproc_per_node=4 -m src.train_cyclegan --config configs/cyclegan.yaml --resume experiments/cyclegan_day2night_20251204_184245/epoch_0020.pt
+torchrun --nproc_per_node=4 -m src.train_cyclegan --config configs/cyclegan.yaml --resume experiments/cyclegan_day2night_20251204_184245/latest.pt
 
 CUDA_VISIBLE_DEVICES=0,1,2 torchrun --nproc_per_node=4 -m src.train_seg --config configs/seg.yaml
-CUDA_VISIBLE_DEVICES=4,5,6,7 torchrun --nproc_per_node=4 -m src.train_cyclegan --config configs/cyclegan.yaml experiments/cyclegan_day2night_20251207_185813/epoch_0120.pt
+CUDA_VISIBLE_DEVICES=4,5,6,7 torchrun --nproc_per_node=4 -m src.train_cyclegan --config configs/cyclegan.yaml --resume experiments/cyclegan_day2night_20251207_185813/latest.pt
 
 torchrun --nproc_per_node=4 --master_port=29503 -m src.train_cyclegan --config configs/cyclegan.yaml/tmp/wait_for_gpu\ copy.sh.
 

@@ -114,7 +114,7 @@ def main() -> None:
     parser.add_argument(
         "--checkpoint",
         "-k",
-        help="Path to epoch_xxxx.pt. Defaults to the latest checkpoint of the configured experiment.",
+        help="Path to checkpoint (latest.pt, best.pt, or epoch_XXXX.pt). Defaults to newest matching run.",
     )
     parser.add_argument(
         "--direction",

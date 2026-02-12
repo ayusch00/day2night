@@ -430,7 +430,21 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
     epochs = cfg["train"]["epochs"]
     decay_start = cfg["train"].get("lr_decay_start", epochs // 2)
     steps_per_epoch = max(len(day_loader), len(night_loader))
-    save_every = cfg["logging"].get("save_every", 40)
+    save_every = int(cfg["logging"].get("save_every", 40))
+    if save_every <= 0:
+        raise ValueError("logging.save_every must be >= 1.")
+    latest_ckpt_name = cfg["logging"].get("latest_checkpoint_name", "latest.pt")
+    best_ckpt_name = cfg["logging"].get("best_checkpoint_name", "best.pt")
+    keep_epoch_checkpoints = bool(cfg["logging"].get("keep_epoch_checkpoints", False))
+    best_metric_name = str(cfg["logging"].get("best_metric", "g_total"))
+    best_metric_mode = str(cfg["logging"].get("best_metric_mode", "min")).lower()
+    valid_metric_names = {"g_total", "g_adv", "g_cycle", "g_id", "g_sky", "d_total"}
+    if best_metric_name not in valid_metric_names:
+        raise ValueError(
+            f"logging.best_metric must be one of {sorted(valid_metric_names)}, got '{best_metric_name}'."
+        )
+    if best_metric_mode not in {"min", "max"}:
+        raise ValueError("logging.best_metric_mode must be 'min' or 'max'.")
     log_every = cfg["logging"].get("log_interval", 50)
 
     config_filename = os.path.basename(cfg_path)
@@ -475,6 +489,16 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
                     fh.write(f"{path}\n")
             print(f"Saved list of {len(dataset.paths)} {domain} images to {filelist_path}")
 
+    best_metric_value: float | None = None
+    best_metric_epoch = 0
+
+    def metric_improved(current: float, best: float | None) -> bool:
+        if best is None:
+            return True
+        if best_metric_mode == "min":
+            return current < best
+        return current > best
+
     start_epoch = 1
     if resume_ckpt:
         state = torch.load(resume_ckpt, map_location="cpu")
@@ -486,8 +510,38 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
         opt_G.load_state_dict(state["opt_G"])
         opt_D.load_state_dict(state["opt_D"])
         start_epoch = int(state.get("epoch", 0)) + 1
+        state_metric_name = state.get("best_metric_name")
+        if state_metric_name == best_metric_name:
+            state_metric_value = state.get("best_metric_value")
+            if isinstance(state_metric_value, (int, float)):
+                best_metric_value = float(state_metric_value)
+                best_metric_epoch = int(state.get("best_metric_epoch", state.get("epoch", 0)))
+        elif is_main and state_metric_name is not None:
+            print(
+                f"[Resume] Checkpoint best metric '{state_metric_name}' differs from configured "
+                f"'{best_metric_name}'. Best tracking will restart."
+            )
         if is_main:
             print(f"[Resume] Loaded checkpoint {resume_ckpt}, restarting from epoch {start_epoch}.")
+
+    if best_metric_value is None:
+        best_ckpt_path = os.path.join(exp_dir, best_ckpt_name)
+        if os.path.isfile(best_ckpt_path):
+            try:
+                best_state = torch.load(best_ckpt_path, map_location="cpu")
+                metric_name = best_state.get("best_metric_name", best_metric_name)
+                metric_value = best_state.get("best_metric_value")
+                if metric_name == best_metric_name and isinstance(metric_value, (int, float)):
+                    best_metric_value = float(metric_value)
+                    best_metric_epoch = int(best_state.get("best_metric_epoch", best_state.get("epoch", 0)))
+                    if is_main:
+                        print(
+                            f"[Resume] Loaded historical best {best_metric_name}={best_metric_value:.4f} "
+                            f"(epoch {best_metric_epoch}) from {best_ckpt_path}."
+                        )
+            except Exception as exc:
+                if is_main:
+                    print(f"[Resume] Warning: failed to read {best_ckpt_path}: {exc}")
 
     for epoch in range(start_epoch, epochs + 1):
         set_linear_lr(opt_G, gen_lr, epoch, decay_start, epochs)
@@ -647,6 +701,11 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
                 log_f.write(msg + "\n")
 
             if epoch % save_every == 0 or epoch == epochs:
+                current_metric = float(avg_all[best_metric_name])
+                improved = metric_improved(current_metric, best_metric_value)
+                if improved:
+                    best_metric_value = current_metric
+                    best_metric_epoch = epoch
                 state = {
                     "epoch": epoch,
                     "G": (G.module if isinstance(G, (nn.DataParallel, DDP)) else G).state_dict(),
@@ -658,8 +717,25 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
                     "opt_G": opt_G.state_dict(),
                     "opt_D": opt_D.state_dict(),
                     "cfg": cfg,
+                    "best_metric_name": best_metric_name,
+                    "best_metric_mode": best_metric_mode,
+                    "best_metric_value": best_metric_value,
+                    "best_metric_epoch": best_metric_epoch,
                 }
-                torch.save(state, os.path.join(exp_dir, f"epoch_{epoch:04d}.pt"))
+                latest_path = os.path.join(exp_dir, latest_ckpt_name)
+                torch.save(state, latest_path)
+                print(f"[Checkpoint] Saved latest checkpoint: {latest_path}")
+
+                if improved:
+                    best_path = os.path.join(exp_dir, best_ckpt_name)
+                    torch.save(state, best_path)
+                    print(
+                        f"[Checkpoint] Updated best checkpoint ({best_metric_name}={best_metric_value:.4f}, "
+                        f"epoch={best_metric_epoch}): {best_path}"
+                    )
+
+                if keep_epoch_checkpoints:
+                    torch.save(state, os.path.join(exp_dir, f"epoch_{epoch:04d}.pt"))
 
     if distributed:
         cleanup_distributed()
@@ -672,7 +748,7 @@ if __name__ == "__main__":
     parser.add_argument("--config", "-c", default="configs/cyclegan.yaml")
     parser.add_argument(
         "--resume",
-        help="Path to epoch_xxxx.pt to resume training (overrides train.resume_checkpoint in config).",
+        help="Path to checkpoint (e.g. latest.pt or best.pt) to resume training.",
     )
     args = parser.parse_args()
     train(args.config, resume=args.resume)

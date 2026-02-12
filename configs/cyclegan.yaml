@@ -81,4 +81,9 @@ logging:
   out_dir: experiments
   results_dir: results
   save_every: 10
+  latest_checkpoint_name: latest.pt
+  best_checkpoint_name: best.pt
+  keep_epoch_checkpoints: false
+  best_metric: g_total
+  best_metric_mode: min
   log_interval: 100

@@ -4,6 +4,8 @@
 /cityscapes_1k
 #/experiments
 epoch_*.pt
+best.pt
+latest.pt
 #!epoch_0200.pt
 /tmp
 core.*

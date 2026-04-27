@@ -1,8 +1,13 @@
 import glob
+import importlib
+import inspect
+import json
 import math
 import os
 import random
 import shutil
+import sys
+from copy import deepcopy
 from dataclasses import dataclass
 from itertools import chain
 from typing import Sequence
@@ -103,6 +108,7 @@ class LossMeters:
     g_cycle: float = 0.0
     g_id: float = 0.0
     g_sky: float = 0.0
+    g_sem: float = 0.0
     d_total: float = 0.0
 
     def update(self, losses: dict[str, float], batch_size: int):
@@ -110,7 +116,7 @@ class LossMeters:
             setattr(self, k, getattr(self, k) + v * batch_size)
 
     def average(self, samples: int) -> dict[str, float]:
-        keys = ["g_total", "g_adv", "g_cycle", "g_id", "g_sky", "d_total"]
+        keys = ["g_total", "g_adv", "g_cycle", "g_id", "g_sky", "g_sem", "d_total"]
         return {k: getattr(self, k) / samples for k in keys}
 
 
@@ -142,7 +148,7 @@ def broadcast_dirs(exp_dir: str | None, results_dir: str | None) -> tuple[str, s
 
 
 def sync_meter_totals(meters: LossMeters, samples: int, device: torch.device, distributed: bool) -> tuple[dict[str, float], int]:
-    keys = ["g_total", "g_adv", "g_cycle", "g_id", "g_sky", "d_total"]
+    keys = ["g_total", "g_adv", "g_cycle", "g_id", "g_sky", "g_sem", "d_total"]
     totals = torch.tensor([getattr(meters, k) for k in keys], device=device)
     sample_tensor = torch.tensor([samples], device=device)
     if distributed:
@@ -183,6 +189,257 @@ def gaussian_blur_tensor(img: torch.Tensor, ksize: int, sigma: float) -> torch.T
     return Fnn.conv2d(img, kernel2d, padding=radius, groups=img.shape[1])
 
 
+def parse_hw_size(value: object, field_name: str) -> tuple[int, int] | None:
+    if value is None:
+        return None
+    if (
+        isinstance(value, (list, tuple))
+        and len(value) == 2
+        and all(isinstance(x, int) and x > 0 for x in value)
+    ):
+        return int(value[0]), int(value[1])
+    raise ValueError(f"{field_name} must be null or [H, W] with positive ints.")
+
+
+def resolve_path_from_cfg(path_spec: str, cfg_path: str) -> str:
+    candidate = os.path.expanduser(str(path_spec))
+    if os.path.isabs(candidate):
+        return candidate
+    cwd_path = os.path.abspath(candidate)
+    if os.path.exists(cwd_path):
+        return cwd_path
+    cfg_dir_path = os.path.abspath(os.path.join(os.path.dirname(cfg_path), candidate))
+    if os.path.exists(cfg_dir_path):
+        return cfg_dir_path
+    # Return cwd-based absolute path for clear downstream error reporting.
+    return cwd_path
+
+
+def normalize_segmentor_state_dict(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    # Some UDA checkpoints store multiple branches; prefer the actual train model.
+    if any(k.startswith("model.") for k in state_dict):
+        state_dict = {k.replace("model.", "", 1): v for k, v in state_dict.items() if k.startswith("model.")}
+
+    for prefix in ("module.", "model."):
+        while state_dict and all(k.startswith(prefix) for k in state_dict):
+            state_dict = {k.replace(prefix, "", 1): v for k, v in state_dict.items()}
+    return state_dict
+
+
+def load_checkpoint_into_model(model: nn.Module, checkpoint_path: str) -> None:
+    state = torch.load(checkpoint_path, map_location="cpu")
+    if not isinstance(state, dict):
+        raise RuntimeError("DTBS checkpoint must be a state_dict or dict containing one.")
+    if "state_dict" in state and isinstance(state["state_dict"], dict):
+        state_dict = state["state_dict"]
+    elif "model" in state and isinstance(state["model"], dict):
+        state_dict = state["model"]
+    else:
+        state_dict = state
+    state_dict = normalize_segmentor_state_dict(state_dict)
+    missing, unexpected = model.load_state_dict(state_dict, strict=False)
+    if missing:
+        raise RuntimeError(f"DTBS checkpoint is missing model keys (first keys): {missing[:5]}")
+    if unexpected:
+        print(f"[SemGAN] Loaded DTBS checkpoint with unexpected keys (first keys): {unexpected[:5]}")
+
+
+def build_dtbs_segmenter(
+    seg_config_json: str,
+    seg_checkpoint: str,
+    num_classes: int,
+) -> nn.Module:
+    if not os.path.isfile(seg_config_json):
+        raise FileNotFoundError(f"semgan.seg_config_json not found: {seg_config_json}")
+    if not os.path.isfile(seg_checkpoint):
+        raise FileNotFoundError(f"semgan.seg_checkpoint not found: {seg_checkpoint}")
+
+    with open(seg_config_json, encoding="utf-8") as fh:
+        cfg_json = json.load(fh)
+    model_cfg = cfg_json.get("model")
+    if not isinstance(model_cfg, dict):
+        raise RuntimeError(f"DTBS config JSON must contain a top-level 'model' dict: {seg_config_json}")
+
+    attempt_errors: list[str] = []
+
+    # Prefer local DTBS vendored stack if present.
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+    local_dtbs_root = os.path.join(repo_root, "third_party", "DTBS")
+    if os.path.isdir(local_dtbs_root) and local_dtbs_root not in sys.path:
+        sys.path.insert(0, local_dtbs_root)
+
+    # Preferred path: mmseg API if available.
+    try:
+        try:
+            from mmseg.apis import init_model as mmseg_init_model  # type: ignore
+        except Exception:
+            from mmseg.apis import init_segmentor as mmseg_init_model  # type: ignore
+
+        init_kwargs = {"device": "cpu"}
+        if "revise_checkpoint" in inspect.signature(mmseg_init_model).parameters:
+            init_kwargs["revise_checkpoint"] = [(r"^model\.", ""), (r"^module\.", "")]
+        model = mmseg_init_model(seg_config_json, None, **init_kwargs)
+        load_checkpoint_into_model(model, seg_checkpoint)
+        return model
+    except Exception as exc:  # noqa: BLE001
+        attempt_errors.append(f"mmseg.apis init_model/init_segmentor failed: {exc}")
+
+    # Fallback: build mmseg model manually and load checkpoint.
+    manual_model_cfg = deepcopy(model_cfg)
+    # DTBS/mmseg v0.x expects segmentor-level pretrained to be None at inference build time.
+    manual_model_cfg["pretrained"] = None
+    decode_head = manual_model_cfg.get("decode_head")
+    if isinstance(decode_head, dict):
+        decode_head["num_classes"] = num_classes
+    elif isinstance(decode_head, list):
+        for head in decode_head:
+            if isinstance(head, dict):
+                head["num_classes"] = num_classes
+
+    try:
+        from mmseg.models import build_segmentor  # type: ignore
+
+        model = build_segmentor(manual_model_cfg)
+        try:
+            from mmengine.runner import load_checkpoint  # type: ignore
+
+            load_checkpoint(model, seg_checkpoint, map_location="cpu")
+            return model
+        except Exception as mmengine_exc:  # noqa: BLE001
+            attempt_errors.append(f"mmengine.runner.load_checkpoint failed: {mmengine_exc}")
+        try:
+            from mmcv.runner import load_checkpoint  # type: ignore
+
+            load_checkpoint(model, seg_checkpoint, map_location="cpu")
+            return model
+        except Exception as mmcv_exc:  # noqa: BLE001
+            attempt_errors.append(f"mmcv.runner.load_checkpoint failed: {mmcv_exc}")
+        load_checkpoint_into_model(model, seg_checkpoint)
+        return model
+    except Exception as exc:  # noqa: BLE001
+        attempt_errors.append(f"manual mmseg build/load failed: {exc}")
+
+    # Fallback: potential local DTBS repo module with build_segmentor().
+    local_builder_candidates = [
+        "dtbs.models.builder",
+        "dtbs.modeling.builder",
+        "dtbs.segmentation.builder",
+    ]
+    for module_name in local_builder_candidates:
+        try:
+            mod = importlib.import_module(module_name)
+            build_segmentor = getattr(mod, "build_segmentor")
+            model = build_segmentor(manual_model_cfg)
+            load_checkpoint_into_model(model, seg_checkpoint)
+            return model
+        except Exception as exc:  # noqa: BLE001
+            attempt_errors.append(f"{module_name}.build_segmentor failed: {exc}")
+
+    details = "\n".join(f"  - {msg}" for msg in attempt_errors)
+    raise RuntimeError(
+        "SemGAN DTBS model could not be constructed.\n"
+        f"Config JSON: {seg_config_json}\n"
+        f"Checkpoint: {seg_checkpoint}\n"
+        "Expected DTBS modules were not found or failed to initialize.\n"
+        "Expected options:\n"
+        "  1) MMSeg stack (`mmseg` + `mmengine` or legacy `mmcv`) available in Python env.\n"
+        "  2) Local DTBS code under a subfolder (e.g. `dtbs/...`) exposing `build_segmentor`.\n"
+        "Build attempts:\n"
+        f"{details}"
+    )
+
+
+def prepare_semgan_seg_input(
+    image: torch.Tensor,
+    seg_input_norm: str,
+    seg_inference_size: tuple[int, int] | None,
+) -> torch.Tensor:
+    if seg_input_norm not in {"imagenet", "none", "minus1_1"}:
+        raise ValueError("semgan.seg_input_norm must be one of: imagenet, none, minus1_1.")
+
+    if seg_input_norm == "minus1_1":
+        seg_input = image
+    else:
+        seg_input = image.mul(0.5).add(0.5).clamp(0.0, 1.0)
+        if seg_input_norm == "imagenet":
+            mean = image.new_tensor((0.485, 0.456, 0.406)).view(1, 3, 1, 1)
+            std = image.new_tensor((0.229, 0.224, 0.225)).view(1, 3, 1, 1)
+            seg_input = (seg_input - mean) / std
+
+    if seg_inference_size is not None:
+        seg_input = Fnn.interpolate(
+            seg_input,
+            size=seg_inference_size,
+            mode="bilinear",
+            align_corners=False,
+        )
+    return seg_input
+
+
+def run_segmenter_for_semgan(
+    seg_model: nn.Module,
+    image: torch.Tensor,
+    seg_input_norm: str,
+    seg_inference_size: tuple[int, int] | None,
+) -> torch.Tensor:
+    seg_input = prepare_semgan_seg_input(image, seg_input_norm, seg_inference_size)
+
+    # DTBS/mmseg segmentors are usually called with img+img_metas; encode_decode
+    # returns per-class logits directly, which matches the SemGAN loss usage here.
+    if hasattr(seg_model, "encode_decode"):
+        h, w = int(seg_input.shape[-2]), int(seg_input.shape[-1])
+        img_metas = [
+            {
+                "ori_shape": (h, w, 3),
+                "img_shape": (h, w, 3),
+                "pad_shape": (h, w, 3),
+                "scale_factor": 1.0,
+                "flip": False,
+                "flip_direction": "horizontal",
+            }
+            for _ in range(seg_input.shape[0])
+        ]
+        return seg_model.encode_decode(seg_input, img_metas)  # type: ignore[attr-defined]
+
+    return seg_model(seg_input)
+
+
+def masked_channel_mean(value: torch.Tensor, mask_hw: torch.Tensor) -> torch.Tensor:
+    mask = mask_hw.unsqueeze(1).to(dtype=value.dtype)
+    denom = (mask.sum() * value.shape[1]).clamp_min(1.0)
+    return (value * mask).sum() / denom
+
+
+def semantic_consistency_loss(
+    logits_real: torch.Tensor,
+    logits_fake: torch.Tensor,
+    sem_loss_type: str,
+    ignore_index: int,
+) -> torch.Tensor:
+    sem_loss_type = sem_loss_type.lower()
+    if sem_loss_type not in {"l1_prob", "kl_prob", "ce_pseudo"}:
+        raise ValueError("semgan.sem_loss_type must be one of: l1_prob, kl_prob, ce_pseudo.")
+
+    pseudo_labels = logits_real.argmax(dim=1)
+    valid_mask = pseudo_labels != ignore_index
+    if not torch.any(valid_mask):
+        return logits_fake.new_zeros(())
+
+    if sem_loss_type == "ce_pseudo":
+        ce_map = Fnn.cross_entropy(logits_fake, pseudo_labels, reduction="none")
+        return ce_map[valid_mask].mean()
+
+    probs_real = torch.softmax(logits_real, dim=1)
+    probs_fake = torch.softmax(logits_fake, dim=1)
+
+    if sem_loss_type == "l1_prob":
+        return masked_channel_mean((probs_fake - probs_real).abs(), valid_mask)
+
+    eps = 1e-8
+    kl_map = probs_real * ((probs_real + eps).log() - (probs_fake + eps).log())
+    return masked_channel_mean(kl_map, valid_mask)
+
+
 class ImagePool:
     """Stores previously generated images to stabilize discriminator training."""
 
@@ -213,6 +470,9 @@ class ImagePool:
 def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
     cfg_path = os.path.abspath(cfg_path)
     cfg = load_cfg(cfg_path)
+    # SemGAN usage:
+    #   python -m src.train_cyclegan --config configs/semgan.yaml
+    # Requires semgan.use_semgan=true plus semgan.seg_config_json and semgan.seg_checkpoint.
     resume_ckpt = resume or cfg.get("train", {}).get("resume_checkpoint")
     distributed, local_rank = init_distributed_if_needed()
     rank = dist.get_rank() if distributed else 0
@@ -330,7 +590,35 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
     sky_input_size = sky_cfg.get("seg_input_size")
     if sky_input_size is not None:
         sky_input_size = tuple(int(x) for x in sky_input_size)
-    seg_model = None
+    sky_seg_model = None
+
+    sem_cfg = cfg.get("semgan", {})
+    use_semgan = bool(sem_cfg.get("use_semgan", False))
+    sem_lambda = float(sem_cfg.get("lambda_sem", 0.1))
+    sem_loss_type = str(sem_cfg.get("sem_loss_type", "l1_prob")).lower()
+    valid_sem_loss_types = {"l1_prob", "kl_prob", "ce_pseudo"}
+    if use_semgan and sem_loss_type not in valid_sem_loss_types:
+        raise ValueError(
+            f"semgan.sem_loss_type must be one of {sorted(valid_sem_loss_types)}, got '{sem_loss_type}'."
+        )
+    sem_apply_raw = sem_cfg.get("apply_on", ["A2B", "B2A"])
+    if isinstance(sem_apply_raw, str):
+        sem_apply_raw = [sem_apply_raw]
+    sem_apply_on = {str(direction).upper() for direction in sem_apply_raw}
+    valid_sem_apply = {"A2B", "B2A"}
+    invalid_apply = sem_apply_on - valid_sem_apply
+    if invalid_apply:
+        raise ValueError(
+            f"semgan.apply_on supports only {sorted(valid_sem_apply)}, got invalid entries: {sorted(invalid_apply)}"
+        )
+    if use_semgan and not sem_apply_on:
+        raise ValueError("semgan.apply_on must contain at least one direction when semgan.use_semgan=true.")
+    sem_num_classes = int(sem_cfg.get("num_classes", 19) or 19)
+    sem_ignore_index = int(sem_cfg.get("ignore_index", 255))
+    sem_seg_input_norm = str(sem_cfg.get("seg_input_norm", "imagenet")).lower()
+    sem_seg_inference_size = parse_hw_size(sem_cfg.get("seg_inference_size"), "semgan.seg_inference_size")
+    sem_cache_seg_logits = bool(sem_cfg.get("cache_seg_logits", False))
+    sem_seg_model = None
 
     if distributed:
         ddp_kwargs = dict(device_ids=[device.index], output_device=device.index, find_unused_parameters=False)
@@ -373,7 +661,7 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
             if use_sky_loss:
                 if is_main:
                     print(f"[SkyLoss] Using seg checkpoint: {seg_ckpt}")
-                seg_model = SegNet9ResUNet(num_classes=num_classes).to(device)
+                sky_seg_model = SegNet9ResUNet(num_classes=num_classes).to(device)
                 try:
                     state = torch.load(seg_ckpt, map_location="cpu")
                     if not isinstance(state, dict):
@@ -381,7 +669,7 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
                     state_dict = state["state_dict"] if "state_dict" in state else state
                     if state_dict and all(k.startswith("module.") for k in state_dict):
                         state_dict = {k.replace("module.", "", 1): v for k, v in state_dict.items()}
-                    missing, unexpected = seg_model.load_state_dict(state_dict, strict=False)
+                    missing, unexpected = sky_seg_model.load_state_dict(state_dict, strict=False)
                     if missing:
                         raise RuntimeError(
                             f"Missing keys when loading seg checkpoint (need full encoder+decoder): {missing[:5]}"
@@ -391,11 +679,11 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
                 except Exception as exc:  # noqa: BLE001
                     if is_main:
                         print(f"[SkyLoss] Disabled: failed to load seg checkpoint ({exc}).")
-                    seg_model = None
+                    sky_seg_model = None
                     use_sky_loss = False
                 else:
-                    seg_model.eval()
-                    for p in seg_model.parameters():
+                    sky_seg_model.eval()
+                    for p in sky_seg_model.parameters():
                         p.requires_grad = False
                     if is_main:
                         print(
@@ -404,6 +692,32 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
                             f"peak_sigma={sky_peak_sigma}, peak_delta={sky_peak_delta}, "
                             f"tv_weight={sky_tv_weight}, ckpt={seg_ckpt}"
                         )
+
+    if use_semgan:
+        sem_seg_config = sem_cfg.get("seg_config_json")
+        sem_seg_ckpt = sem_cfg.get("seg_checkpoint")
+        if not sem_seg_config:
+            raise ValueError("semgan.use_semgan=true requires semgan.seg_config_json.")
+        if not sem_seg_ckpt:
+            raise ValueError("semgan.use_semgan=true requires semgan.seg_checkpoint.")
+        sem_seg_config = resolve_path_from_cfg(str(sem_seg_config), cfg_path)
+        sem_seg_ckpt = resolve_path_from_cfg(str(sem_seg_ckpt), cfg_path)
+        sem_seg_model = build_dtbs_segmenter(
+            seg_config_json=sem_seg_config,
+            seg_checkpoint=sem_seg_ckpt,
+            num_classes=sem_num_classes,
+        ).to(device)
+        sem_seg_model.eval()
+        for param in sem_seg_model.parameters():
+            param.requires_grad = False
+        if is_main:
+            print(
+                f"[SemGAN] Enabled with loss={sem_loss_type}, lambda_sem={sem_lambda}, apply_on={sorted(sem_apply_on)}, "
+                f"num_classes={sem_num_classes}, ignore_index={sem_ignore_index}, "
+                f"seg_input_norm={sem_seg_input_norm}, seg_inference_size={sem_seg_inference_size}, "
+                f"cache_seg_logits={sem_cache_seg_logits}"
+            )
+            print(f"[SemGAN] DTBS config={sem_seg_config}, checkpoint={sem_seg_ckpt}")
 
     gan_loss = GANLoss().to(device)
     l1_loss = nn.L1Loss()
@@ -438,7 +752,7 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
     keep_epoch_checkpoints = bool(cfg["logging"].get("keep_epoch_checkpoints", False))
     best_metric_name = str(cfg["logging"].get("best_metric", "g_total"))
     best_metric_mode = str(cfg["logging"].get("best_metric_mode", "min")).lower()
-    valid_metric_names = {"g_total", "g_adv", "g_cycle", "g_id", "g_sky", "d_total"}
+    valid_metric_names = {"g_total", "g_adv", "g_cycle", "g_id", "g_sky", "g_sem", "d_total"}
     if best_metric_name not in valid_metric_names:
         raise ValueError(
             f"logging.best_metric must be one of {sorted(valid_metric_names)}, got '{best_metric_name}'."
@@ -613,7 +927,7 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
                 sky_grad_term = fake_night.new_zeros(())
                 sky_tv_term = fake_night.new_zeros(())
                 sky_peak_term = fake_night.new_zeros(())
-                if use_sky_loss and seg_model is not None:
+                if use_sky_loss and sky_seg_model is not None:
                     with torch.no_grad(), amp.autocast(device_type=amp_device, enabled=False):
                         seg_in = day
                         if sky_input_size is not None:
@@ -623,7 +937,7 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
                                 mode="bilinear",
                                 align_corners=False,
                             )
-                        seg_logits = seg_model(seg_in)
+                        seg_logits = sky_seg_model(seg_in)
                         seg_pred = seg_logits.argmax(dim=1)
                         mask = torch.zeros_like(seg_pred, dtype=torch.float32)
                         for cid in sky_class_ids:
@@ -659,10 +973,62 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
                         if sky_tv_weight > 0.0:
                             sky_tv_term = total_variation_loss(fake_night * sky_mask)
 
+                sem_loss_total = fake_night.new_zeros(())
+                if use_semgan and sem_seg_model is not None and sem_apply_on:
+                    real_logits_cache: dict[str, torch.Tensor] = {}
+
+                    def get_real_logits(key: str, domain_tensor: torch.Tensor) -> torch.Tensor:
+                        if sem_cache_seg_logits and key in real_logits_cache:
+                            return real_logits_cache[key]
+                        with torch.no_grad(), amp.autocast(device_type=amp_device, enabled=False):
+                            logits = run_segmenter_for_semgan(
+                                sem_seg_model,
+                                domain_tensor.float(),
+                                seg_input_norm=sem_seg_input_norm,
+                                seg_inference_size=sem_seg_inference_size,
+                            )
+                        if sem_cache_seg_logits:
+                            real_logits_cache[key] = logits
+                        return logits
+
+                    if "A2B" in sem_apply_on:
+                        logits_real_a = get_real_logits("A", day)
+                        with amp.autocast(device_type=amp_device, enabled=False):
+                            logits_fake_b = run_segmenter_for_semgan(
+                                sem_seg_model,
+                                fake_night.float(),
+                                seg_input_norm=sem_seg_input_norm,
+                                seg_inference_size=sem_seg_inference_size,
+                            )
+                        sem_loss_total = sem_loss_total + semantic_consistency_loss(
+                            logits_real=logits_real_a,
+                            logits_fake=logits_fake_b,
+                            sem_loss_type=sem_loss_type,
+                            ignore_index=sem_ignore_index,
+                        )
+
+                    if "B2A" in sem_apply_on:
+                        logits_real_b = get_real_logits("B", night)
+                        with amp.autocast(device_type=amp_device, enabled=False):
+                            logits_fake_a = run_segmenter_for_semgan(
+                                sem_seg_model,
+                                fake_day.float(),
+                                seg_input_norm=sem_seg_input_norm,
+                                seg_inference_size=sem_seg_inference_size,
+                            )
+                        sem_loss_total = sem_loss_total + semantic_consistency_loss(
+                            logits_real=logits_real_b,
+                            logits_fake=logits_fake_a,
+                            sem_loss_type=sem_loss_type,
+                            ignore_index=sem_ignore_index,
+                        )
+
                 total_g = adv_loss + lambda_cycle * cycle_loss + lambda_id * id_loss
-                if use_sky_loss and seg_model is not None:
+                if use_sky_loss and sky_seg_model is not None:
                     total_g = total_g + sky_grad_weight * sky_grad_term + sky_peak_weight * sky_peak_term
                     total_g = total_g + sky_tv_weight * sky_tv_term
+                if use_semgan and sem_seg_model is not None:
+                    total_g = total_g + sem_lambda * sem_loss_total
             scaler_G.scale(total_g).backward()
             scaler_G.step(opt_G)
             scaler_G.update()
@@ -675,8 +1041,9 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
                 "g_sky": (
                     sky_grad_weight * sky_grad_term + sky_peak_weight * sky_peak_term + sky_tv_weight * sky_tv_term
                 ).item()
-                if use_sky_loss and seg_model is not None
+                if use_sky_loss and sky_seg_model is not None
                 else 0.0,
+                "g_sem": (sem_lambda * sem_loss_total).item() if use_semgan and sem_seg_model is not None else 0.0,
                 "d_total": loss_d.item(),
             }
             meters.update(batch_losses, bsz)
@@ -686,6 +1053,8 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
                 postfix = {k: f"{v:.4f}" for k, v in avg_local.items()}
                 if not use_sky_loss:
                     postfix.pop("g_sky", None)
+                if not use_semgan:
+                    postfix.pop("g_sem", None)
                 iterator.set_postfix(postfix)
 
         avg_all, _ = sync_meter_totals(meters, samples, device, distributed)
@@ -695,6 +1064,8 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
             )
             if use_sky_loss:
                 detail += f", sky={avg_all['g_sky']:.4f}"
+            if use_semgan:
+                detail += f", sem={avg_all['g_sem']:.4f}"
             msg = f"[{epoch}/{epochs}] D={avg_all['d_total']:.4f} G={avg_all['g_total']:.4f} ({detail})"
             print(msg)
             with open(loss_log_path, "a") as log_f:

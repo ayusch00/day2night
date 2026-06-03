@@ -522,16 +522,20 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
     gen_cfg = cfg["model"]["generator"]
     disc_cfg = cfg["model"]["discriminator"]
 
-    encoder_ckpt = resolve_encoder_checkpoint(
-        gen_cfg.get("encoder_checkpoint"),
-        experiments_root=cfg["logging"].get("out_dir", "experiments"),
-        default_run_prefix=gen_cfg.get("encoder_run_prefix", "seg"),
-        filename=gen_cfg.get("encoder_filename", "encoder_GE.pth"),
-    )
     freeze_encoder = gen_cfg.get("freeze_encoder", False)
+    encoder_ckpt = (
+        resolve_encoder_checkpoint(
+            gen_cfg.get("encoder_checkpoint"),
+            experiments_root=cfg["logging"].get("out_dir", "experiments"),
+            default_run_prefix=gen_cfg.get("encoder_run_prefix", "seg"),
+            filename=gen_cfg.get("encoder_filename", "encoder_GE.pth"),
+        )
+        if freeze_encoder
+        else None
+    )
     decoder_res_blocks = gen_cfg.get("decoder_res_blocks", 3)
 
-    # Paper setup: G (day->night) reuses and freezes the segmentation encoder, F (night->day) starts fresh.
+    # G uses the segmentation encoder only when freeze_encoder is true; otherwise it starts random.
     g_encoder_ckpt = encoder_ckpt
     g_freeze_encoder = freeze_encoder
     f_encoder_ckpt = None

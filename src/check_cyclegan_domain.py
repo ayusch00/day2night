@@ -14,15 +14,17 @@ from src.utils.common import load_cfg, resolve_encoder_checkpoint
 
 def _make_generator(cfg: dict, device: torch.device, direction: str) -> CycleGANGenerator:
     gen_cfg = cfg["model"]["generator"]
-    encoder_ckpt = resolve_encoder_checkpoint(
-        gen_cfg.get("encoder_checkpoint"),
-        experiments_root=cfg["logging"].get("out_dir", "experiments"),
-        default_run_prefix=gen_cfg.get("encoder_run_prefix", "seg"),
-        filename=gen_cfg.get("encoder_filename", "encoder_GE.pth"),
+    freeze_encoder = gen_cfg.get("freeze_encoder", False) if direction == "day2night" else False
+    encoder_for_direction = (
+        resolve_encoder_checkpoint(
+            gen_cfg.get("encoder_checkpoint"),
+            experiments_root=cfg["logging"].get("out_dir", "experiments"),
+            default_run_prefix=gen_cfg.get("encoder_run_prefix", "seg"),
+            filename=gen_cfg.get("encoder_filename", "encoder_GE.pth"),
+        )
+        if freeze_encoder
+        else None
     )
-    use_encoder = direction == "day2night"
-    encoder_for_direction = encoder_ckpt if use_encoder else None
-    freeze_encoder = gen_cfg.get("freeze_encoder", False) if use_encoder else False
     return CycleGANGenerator(
         in_channels=gen_cfg.get("in_channels", 3),
         out_channels=gen_cfg.get("out_channels", 3),

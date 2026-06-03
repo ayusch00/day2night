@@ -86,16 +86,17 @@ def find_checkpoint(checkpoint: str | None, cfg: dict) -> Path:
 
 def build_generator(cfg: dict, device: torch.device, direction: str) -> CycleGANGenerator:
     gen_cfg = cfg["model"]["generator"]
-    encoder_ckpt = resolve_encoder_checkpoint(
-        gen_cfg.get("encoder_checkpoint"),
-        experiments_root=cfg["logging"].get("out_dir", "experiments"),
-        default_run_prefix=gen_cfg.get("encoder_run_prefix", "seg"),
-        filename=gen_cfg.get("encoder_filename", "encoder_GE.pth"),
+    freeze_encoder = gen_cfg.get("freeze_encoder", False) if direction == "day2night" else False
+    encoder_for_direction = (
+        resolve_encoder_checkpoint(
+            gen_cfg.get("encoder_checkpoint"),
+            experiments_root=cfg["logging"].get("out_dir", "experiments"),
+            default_run_prefix=gen_cfg.get("encoder_run_prefix", "seg"),
+            filename=gen_cfg.get("encoder_filename", "encoder_GE.pth"),
+        )
+        if freeze_encoder
+        else None
     )
-    # Paper setup: only G (day->night) reuses and freezes the segmentation encoder.
-    use_encoder = direction == "day2night"
-    encoder_for_direction = encoder_ckpt if use_encoder else None
-    freeze_encoder = gen_cfg.get("freeze_encoder", False) if use_encoder else False
     print(
         f"Building {direction} generator | encoder: {encoder_for_direction or 'None'} | freeze={freeze_encoder}"
     )

@@ -115,7 +115,7 @@ class GeneratorDecoder(nn.Module):
 
 class CycleGANGenerator(nn.Module):
     """
-    CycleGAN generator that re-uses the segmentation encoder weights.
+    CycleGAN generator with optional frozen segmentation encoder transfer.
     """
 
     def __init__(
@@ -140,7 +140,7 @@ class CycleGANGenerator(nn.Module):
         )
         self.decoder.apply(init_decoder_weights)
 
-        if encoder_checkpoint:
+        if encoder_checkpoint and freeze_encoder:
             self.load_encoder_weights(encoder_checkpoint)
 
         if freeze_encoder:

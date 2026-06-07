@@ -12,6 +12,7 @@ pip install -r requirements.txt
    - `latest` (Standard, nimmt den jüngsten `experiments/seg_*/encoder_GE.pth`),
    - `latest:<glob>` für eigene Muster (z. B. `latest:seg_cityscapes_*`),
    - oder einen konkreten Pfad/Ordner mit `encoder_GE.pth`.
+   Der Checkpoint wird nur verwendet, wenn `model.generator.freeze_encoder: true` ist; bei `false` startet `G` zufällig initialisiert.
 3. Optional: Passen Sie Hyperparameter, Pfade oder Augmentationen in `configs/cyclegan.yaml` an.
 4. Starten Sie das Training (200 Epochen, davon 100 konstant, danach lineare LR-Absenkung):
 

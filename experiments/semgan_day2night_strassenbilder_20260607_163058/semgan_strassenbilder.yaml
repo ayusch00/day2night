@@ -1,12 +1,12 @@
-exp_name: semgan_day2night
+exp_name: semgan_day2night_strassenbilder
 
 data:
   #day_dir: data/bdd_split/cyclegan/trainA
   #night_dir: data/bdd_split/cyclegan/trainB
-  day_dir: data/bdd_kaggle_labels/bdd100k/bdd100k/images/100k/train/trainA
-  night_dir: data/mix_bdd_fh_zurich/train
+  #day_dir: data/bdd_kaggle_labels/bdd100k/bdd100k/images/100k/train/trainA
+  night_dir: data/bdd_kaggle_labels/bdd100k/bdd100k/images/100k/train/trainB
   #night_dir: data/fh_nacht/nacht/train
-  #day_dir: data/Straßen Bilder/train
+  day_dir: data/Straßen Bilder/train
   #day_dir: data/cityscapes/leftImg8bit/train
   #night_dir: data/fh_nacht/dämmerung/train
   #day_dir: data/night2day/night_to_day/trainA

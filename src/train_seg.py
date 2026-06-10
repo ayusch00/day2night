@@ -1,4 +1,5 @@
 # src/train_seg_min.py
+import copy
 import os, torch, torch.nn as nn, random, time, shutil
 import torch.distributed as dist
 from torch.cuda.amp import GradScaler, autocast
@@ -286,6 +287,10 @@ def main(cfg_path="configs/seg.yaml"):
     )
     crit = nn.CrossEntropyLoss(weight=class_weights, ignore_index=cfg["data"]["ignore_index"])
     scaler = GradScaler(enabled=use_amp)
+    best_miou = float("-inf")
+    best_epoch = 0
+    best_encoder_state = None
+    best_full_state = None
 
     for ep in range(1, cfg["train"]["epochs"] + 1):
         model.train()
@@ -345,6 +350,20 @@ def main(cfg_path="configs/seg.yaml"):
                 print(val_msg)
                 with open(loss_log_path, "a") as log_f:
                     log_f.write(val_msg + "\n")
+                if miou > best_miou:
+                    best_miou = miou
+                    best_epoch = ep
+                    core_model = model.module if isinstance(model, DDP) else model
+                    best_encoder_state = copy.deepcopy(
+                        {k: v.detach().cpu() for k, v in core_model.encoder.state_dict().items()}
+                    )
+                    best_full_state = copy.deepcopy(
+                        {k: v.detach().cpu() for k, v in core_model.state_dict().items()}
+                    )
+                    best_msg = f"[best:{ep}] mIoU={best_miou:.4f}, pixAcc={pix_acc:.4f}"
+                    print(best_msg)
+                    with open(loss_log_path, "a") as log_f:
+                        log_f.write(best_msg + "\n")
         if scheduler is not None:
             scheduler.step()
 
@@ -353,13 +372,17 @@ def main(cfg_path="configs/seg.yaml"):
     full_name = artifacts_cfg.get("full_model", "segnet_full.pth")
     core_model = model.module if isinstance(model, DDP) else model
     if is_main:
+        if best_encoder_state is None:
+            best_encoder_state = {k: v.detach().cpu() for k, v in core_model.encoder.state_dict().items()}
+            best_full_state = {k: v.detach().cpu() for k, v in core_model.state_dict().items()}
+            best_epoch = cfg["train"]["epochs"]
         enc_out = os.path.join(run_dir, enc_name)
-        torch.save(core_model.encoder.state_dict(), enc_out)
-        print(f"Saved encoder to {enc_out}")
+        torch.save(best_encoder_state, enc_out)
+        print(f"Saved best encoder from epoch {best_epoch} to {enc_out}")
         if full_name:
             full_out = os.path.join(run_dir, full_name)
-            torch.save(core_model.state_dict(), full_out)
-            print(f"Saved full SegNet to {full_out}")
+            torch.save(best_full_state, full_out)
+            print(f"Saved best full SegNet from epoch {best_epoch} to {full_out}")
     cleanup_distributed()
 
 if __name__ == "__main__":

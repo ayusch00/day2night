@@ -141,6 +141,16 @@ def cleanup_distributed():
         dist.destroy_process_group()
 
 
+def atomic_torch_save(state: dict, path: str) -> None:
+    tmp_path = f"{path}.tmp-{os.getpid()}"
+    try:
+        torch.save(state, tmp_path)
+        os.replace(tmp_path, path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
 def broadcast_dirs(exp_dir: str | None, results_dir: str | None) -> tuple[str, str]:
     payload = [exp_dir, results_dir]
     dist.broadcast_object_list(payload, src=0)
@@ -1098,19 +1108,19 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
                     "best_metric_epoch": best_metric_epoch,
                 }
                 latest_path = os.path.join(exp_dir, latest_ckpt_name)
-                torch.save(state, latest_path)
+                atomic_torch_save(state, latest_path)
                 print(f"[Checkpoint] Saved latest checkpoint: {latest_path}")
 
                 if improved:
                     best_path = os.path.join(exp_dir, best_ckpt_name)
-                    torch.save(state, best_path)
+                    atomic_torch_save(state, best_path)
                     print(
                         f"[Checkpoint] Updated best checkpoint ({best_metric_name}={best_metric_value:.4f}, "
                         f"epoch={best_metric_epoch}): {best_path}"
                     )
 
                 if keep_epoch_checkpoints:
-                    torch.save(state, os.path.join(exp_dir, f"epoch_{epoch:04d}.pt"))
+                    atomic_torch_save(state, os.path.join(exp_dir, f"epoch_{epoch:04d}.pt"))
 
     if distributed:
         cleanup_distributed()

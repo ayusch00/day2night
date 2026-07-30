@@ -140,6 +140,15 @@ checkpoints/dtbs/cs2acdc_latest.pth
 checkpoints/semgan_prop5k.pt
 ```
 
+### Optional checkpoint bundle
+
+As an alternative to obtaining the files individually, download the complete
+checkpoint folder from [TU Berlin TubCloud](https://tubcloud.tu-berlin.de/s/CY7qWQ2XMgHmpqF).
+Copy the downloaded `checkpoints/` folder to the repository root, or copy its
+contents into the existing local `checkpoints/` directory. This download is
+optional; the individual setup instructions remain available in
+[checkpoints/README.md](checkpoints/README.md).
+
 Only the first two are needed to start translation training. The complete
 `semgan_prop5k.pt` file is used for final-run inference and already contains
 both translation generators. The optional notebook reference

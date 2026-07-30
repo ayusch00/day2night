@@ -12,6 +12,18 @@ checkpoints/
     └── cs2acdc_latest.pth
 ```
 
+## Optional complete download
+
+The complete checkpoint folder is available from
+[TU Berlin TubCloud](https://tubcloud.tu-berlin.de/s/CY7qWQ2XMgHmpqF).
+After downloading it through the TubCloud web interface, place the
+`checkpoints/` folder in the repository root. If the folder already exists,
+copy the downloaded contents into it. The resulting paths should match the
+layout above.
+
+This bundle is optional. The sections below document the individual files and
+their provenance.
+
 ## `encoder_GE.pth`
 
 This is the best frozen generator encoder produced by the Cityscapes

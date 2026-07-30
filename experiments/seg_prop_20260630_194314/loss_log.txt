@@ -1,0 +1,658 @@
+[1/300] loss=2.1436
+[val:1] mIoU=0.1896, pixAcc=0.5965
+[best:1] mIoU=0.1896, pixAcc=0.5965
+[2/300] loss=1.8092
+[val:2] mIoU=0.1902, pixAcc=0.5532
+[best:2] mIoU=0.1902, pixAcc=0.5532
+[3/300] loss=1.6818
+[val:3] mIoU=0.2092, pixAcc=0.5930
+[best:3] mIoU=0.2092, pixAcc=0.5930
+[4/300] loss=1.5295
+[val:4] mIoU=0.2364, pixAcc=0.6338
+[best:4] mIoU=0.2364, pixAcc=0.6338
+[5/300] loss=1.4455
+[val:5] mIoU=0.2333, pixAcc=0.6388
+[6/300] loss=1.3724
+[val:6] mIoU=0.2698, pixAcc=0.6901
+[best:6] mIoU=0.2698, pixAcc=0.6901
+[7/300] loss=1.3182
+[val:7] mIoU=0.2583, pixAcc=0.6739
+[8/300] loss=1.2632
+[val:8] mIoU=0.2593, pixAcc=0.6486
+[9/300] loss=1.2030
+[val:9] mIoU=0.2948, pixAcc=0.7136
+[best:9] mIoU=0.2948, pixAcc=0.7136
+[10/300] loss=1.1404
+[val:10] mIoU=0.2767, pixAcc=0.6820
+[11/300] loss=1.1096
+[val:11] mIoU=0.2509, pixAcc=0.6475
+[12/300] loss=1.0736
+[val:12] mIoU=0.2958, pixAcc=0.6958
+[best:12] mIoU=0.2958, pixAcc=0.6958
+[13/300] loss=1.0347
+[val:13] mIoU=0.3046, pixAcc=0.7139
+[best:13] mIoU=0.3046, pixAcc=0.7139
+[14/300] loss=0.9979
+[val:14] mIoU=0.3202, pixAcc=0.7522
+[best:14] mIoU=0.3202, pixAcc=0.7522
+[15/300] loss=0.9542
+[val:15] mIoU=0.3211, pixAcc=0.7476
+[best:15] mIoU=0.3211, pixAcc=0.7476
+[16/300] loss=0.9234
+[val:16] mIoU=0.3070, pixAcc=0.7062
+[17/300] loss=0.9060
+[val:17] mIoU=0.3427, pixAcc=0.7754
+[best:17] mIoU=0.3427, pixAcc=0.7754
+[18/300] loss=0.8768
+[val:18] mIoU=0.3229, pixAcc=0.7443
+[19/300] loss=0.8593
+[val:19] mIoU=0.3310, pixAcc=0.7478
+[20/300] loss=0.8226
+[val:20] mIoU=0.3294, pixAcc=0.7231
+[21/300] loss=0.7943
+[val:21] mIoU=0.3560, pixAcc=0.7788
+[best:21] mIoU=0.3560, pixAcc=0.7788
+[22/300] loss=0.7779
+[val:22] mIoU=0.3442, pixAcc=0.7411
+[23/300] loss=0.7454
+[val:23] mIoU=0.3707, pixAcc=0.7836
+[best:23] mIoU=0.3707, pixAcc=0.7836
+[24/300] loss=0.7307
+[val:24] mIoU=0.3543, pixAcc=0.7877
+[25/300] loss=0.7319
+[val:25] mIoU=0.3478, pixAcc=0.7799
+[26/300] loss=0.6704
+[val:26] mIoU=0.3628, pixAcc=0.7695
+[27/300] loss=0.6591
+[val:27] mIoU=0.3879, pixAcc=0.8063
+[best:27] mIoU=0.3879, pixAcc=0.8063
+[28/300] loss=0.6648
+[val:28] mIoU=0.3544, pixAcc=0.7591
+[29/300] loss=0.6734
+[val:29] mIoU=0.3748, pixAcc=0.7819
+[30/300] loss=0.6049
+[val:30] mIoU=0.3653, pixAcc=0.7608
+[31/300] loss=0.5946
+[val:31] mIoU=0.3786, pixAcc=0.7970
+[32/300] loss=0.5766
+[val:32] mIoU=0.3877, pixAcc=0.7887
+[33/300] loss=0.6197
+[val:33] mIoU=0.3668, pixAcc=0.7782
+[34/300] loss=0.5680
+[val:34] mIoU=0.3931, pixAcc=0.8196
+[best:34] mIoU=0.3931, pixAcc=0.8196
+[35/300] loss=0.5972
+[val:35] mIoU=0.3332, pixAcc=0.7595
+[36/300] loss=0.5597
+[val:36] mIoU=0.4012, pixAcc=0.8156
+[best:36] mIoU=0.4012, pixAcc=0.8156
+[37/300] loss=0.5120
+[val:37] mIoU=0.3995, pixAcc=0.7999
+[38/300] loss=0.4892
+[val:38] mIoU=0.4012, pixAcc=0.8178
+[39/300] loss=0.4816
+[val:39] mIoU=0.3952, pixAcc=0.8083
+[40/300] loss=0.5296
+[val:40] mIoU=0.3984, pixAcc=0.8165
+[41/300] loss=0.4548
+[val:41] mIoU=0.4154, pixAcc=0.8233
+[best:41] mIoU=0.4154, pixAcc=0.8233
+[42/300] loss=0.5715
+[val:42] mIoU=0.3873, pixAcc=0.8076
+[43/300] loss=0.5726
+[val:43] mIoU=0.3845, pixAcc=0.8090
+[44/300] loss=0.4861
+[val:44] mIoU=0.4090, pixAcc=0.8125
+[45/300] loss=0.4168
+[val:45] mIoU=0.4106, pixAcc=0.8148
+[46/300] loss=0.3885
+[val:46] mIoU=0.4167, pixAcc=0.8192
+[best:46] mIoU=0.4167, pixAcc=0.8192
+[47/300] loss=0.4916
+[val:47] mIoU=0.4221, pixAcc=0.8392
+[best:47] mIoU=0.4221, pixAcc=0.8392
+[48/300] loss=0.4115
+[val:48] mIoU=0.4299, pixAcc=0.8383
+[best:48] mIoU=0.4299, pixAcc=0.8383
+[49/300] loss=0.3639
+[val:49] mIoU=0.4340, pixAcc=0.8459
+[best:49] mIoU=0.4340, pixAcc=0.8459
+[50/300] loss=0.3526
+[val:50] mIoU=0.4113, pixAcc=0.8157
+[51/300] loss=0.6681
+[val:51] mIoU=0.2185, pixAcc=0.5906
+[52/300] loss=0.7232
+[val:52] mIoU=0.3686, pixAcc=0.7845
+[53/300] loss=0.4084
+[val:53] mIoU=0.4354, pixAcc=0.8456
+[best:53] mIoU=0.4354, pixAcc=0.8456
+[54/300] loss=0.3426
+[val:54] mIoU=0.4367, pixAcc=0.8476
+[best:54] mIoU=0.4367, pixAcc=0.8476
+[55/300] loss=0.3458
+[val:55] mIoU=0.4378, pixAcc=0.8417
+[best:55] mIoU=0.4378, pixAcc=0.8417
+[56/300] loss=0.3306
+[val:56] mIoU=0.3637, pixAcc=0.7632
+[57/300] loss=0.4000
+[val:57] mIoU=0.4219, pixAcc=0.8375
+[58/300] loss=0.3200
+[val:58] mIoU=0.4443, pixAcc=0.8525
+[best:58] mIoU=0.4443, pixAcc=0.8525
+[59/300] loss=0.2977
+[val:59] mIoU=0.4475, pixAcc=0.8488
+[best:59] mIoU=0.4475, pixAcc=0.8488
+[60/300] loss=0.2964
+[val:60] mIoU=0.4367, pixAcc=0.8409
+[61/300] loss=0.6535
+[val:61] mIoU=0.4196, pixAcc=0.8282
+[62/300] loss=0.4217
+[val:62] mIoU=0.4612, pixAcc=0.8634
+[best:62] mIoU=0.4612, pixAcc=0.8634
+[63/300] loss=0.3041
+[val:63] mIoU=0.4388, pixAcc=0.8365
+[64/300] loss=0.2779
+[val:64] mIoU=0.4494, pixAcc=0.8545
+[65/300] loss=0.2679
+[val:65] mIoU=0.4516, pixAcc=0.8601
+[66/300] loss=0.2689
+[val:66] mIoU=0.4408, pixAcc=0.8470
+[67/300] loss=0.5462
+[val:67] mIoU=0.3892, pixAcc=0.8139
+[68/300] loss=0.4207
+[val:68] mIoU=0.4167, pixAcc=0.8206
+[69/300] loss=0.2809
+[val:69] mIoU=0.4562, pixAcc=0.8577
+[70/300] loss=0.2562
+[val:70] mIoU=0.4615, pixAcc=0.8609
+[best:70] mIoU=0.4615, pixAcc=0.8609
+[71/300] loss=0.2474
+[val:71] mIoU=0.4646, pixAcc=0.8661
+[best:71] mIoU=0.4646, pixAcc=0.8661
+[72/300] loss=0.2389
+[val:72] mIoU=0.4650, pixAcc=0.8592
+[best:72] mIoU=0.4650, pixAcc=0.8592
+[73/300] loss=0.5546
+[val:73] mIoU=0.2727, pixAcc=0.6225
+[74/300] loss=0.5393
+[val:74] mIoU=0.4141, pixAcc=0.8249
+[75/300] loss=0.2825
+[val:75] mIoU=0.4549, pixAcc=0.8562
+[76/300] loss=0.2442
+[val:76] mIoU=0.4581, pixAcc=0.8649
+[77/300] loss=0.2288
+[val:77] mIoU=0.4649, pixAcc=0.8664
+[78/300] loss=0.4369
+[val:78] mIoU=0.4270, pixAcc=0.8408
+[79/300] loss=0.3064
+[val:79] mIoU=0.4608, pixAcc=0.8630
+[80/300] loss=0.2272
+[val:80] mIoU=0.4672, pixAcc=0.8662
+[best:80] mIoU=0.4672, pixAcc=0.8662
+[81/300] loss=0.2161
+[val:81] mIoU=0.4742, pixAcc=0.8707
+[best:81] mIoU=0.4742, pixAcc=0.8707
+[82/300] loss=0.2084
+[val:82] mIoU=0.4688, pixAcc=0.8680
+[83/300] loss=0.2116
+[val:83] mIoU=0.4601, pixAcc=0.8679
+[84/300] loss=0.6547
+[val:84] mIoU=0.4323, pixAcc=0.8475
+[85/300] loss=0.2661
+[val:85] mIoU=0.4660, pixAcc=0.8652
+[86/300] loss=0.2136
+[val:86] mIoU=0.4807, pixAcc=0.8740
+[best:86] mIoU=0.4807, pixAcc=0.8740
+[87/300] loss=0.2001
+[val:87] mIoU=0.4701, pixAcc=0.8686
+[88/300] loss=0.1936
+[val:88] mIoU=0.4682, pixAcc=0.8695
+[89/300] loss=0.1983
+[val:89] mIoU=0.4096, pixAcc=0.8365
+[90/300] loss=0.5295
+[val:90] mIoU=0.3959, pixAcc=0.8266
+[91/300] loss=0.2408
+[val:91] mIoU=0.4756, pixAcc=0.8732
+[92/300] loss=0.1968
+[val:92] mIoU=0.4753, pixAcc=0.8685
+[93/300] loss=0.1985
+[val:93] mIoU=0.4754, pixAcc=0.8765
+[94/300] loss=0.1853
+[val:94] mIoU=0.4836, pixAcc=0.8772
+[best:94] mIoU=0.4836, pixAcc=0.8772
+[95/300] loss=0.3099
+[val:95] mIoU=0.2522, pixAcc=0.6432
+[96/300] loss=0.6279
+[val:96] mIoU=0.4252, pixAcc=0.8392
+[97/300] loss=0.2393
+[val:97] mIoU=0.4798, pixAcc=0.8778
+[98/300] loss=0.1955
+[val:98] mIoU=0.4889, pixAcc=0.8856
+[best:98] mIoU=0.4889, pixAcc=0.8856
+[99/300] loss=0.1818
+[val:99] mIoU=0.4913, pixAcc=0.8849
+[best:99] mIoU=0.4913, pixAcc=0.8849
+[100/300] loss=0.1768
+[val:100] mIoU=0.4873, pixAcc=0.8807
+[101/300] loss=0.1799
+[val:101] mIoU=0.4819, pixAcc=0.8807
+[102/300] loss=0.1719
+[val:102] mIoU=0.4842, pixAcc=0.8817
+[103/300] loss=0.1979
+[val:103] mIoU=0.4556, pixAcc=0.8599
+[104/300] loss=0.9020
+[val:104] mIoU=0.3781, pixAcc=0.7947
+[105/300] loss=0.4778
+[val:105] mIoU=0.4107, pixAcc=0.8233
+[106/300] loss=0.2772
+[val:106] mIoU=0.4710, pixAcc=0.8696
+[107/300] loss=0.1976
+[val:107] mIoU=0.4841, pixAcc=0.8791
+[108/300] loss=0.1789
+[val:108] mIoU=0.4864, pixAcc=0.8796
+[109/300] loss=0.1701
+[val:109] mIoU=0.4888, pixAcc=0.8853
+[110/300] loss=0.1641
+[val:110] mIoU=0.4916, pixAcc=0.8870
+[best:110] mIoU=0.4916, pixAcc=0.8870
+[111/300] loss=0.1608
+[val:111] mIoU=0.4891, pixAcc=0.8838
+[112/300] loss=0.1615
+[val:112] mIoU=0.4945, pixAcc=0.8894
+[best:112] mIoU=0.4945, pixAcc=0.8894
+[113/300] loss=0.1696
+[val:113] mIoU=0.4685, pixAcc=0.8676
+[114/300] loss=0.1638
+[val:114] mIoU=0.4944, pixAcc=0.8845
+[115/300] loss=0.7005
+[val:115] mIoU=0.4343, pixAcc=0.8357
+[116/300] loss=0.2827
+[val:116] mIoU=0.4692, pixAcc=0.8704
+[117/300] loss=0.1832
+[val:117] mIoU=0.4793, pixAcc=0.8732
+[118/300] loss=0.1637
+[val:118] mIoU=0.4863, pixAcc=0.8756
+[119/300] loss=0.1570
+[val:119] mIoU=0.4820, pixAcc=0.8809
+[120/300] loss=0.1513
+[val:120] mIoU=0.4904, pixAcc=0.8847
+[121/300] loss=0.2408
+[val:121] mIoU=0.3563, pixAcc=0.7746
+[122/300] loss=0.3873
+[val:122] mIoU=0.4469, pixAcc=0.8559
+[123/300] loss=0.1714
+[val:123] mIoU=0.4937, pixAcc=0.8854
+[124/300] loss=0.1504
+[val:124] mIoU=0.4925, pixAcc=0.8879
+[125/300] loss=0.1451
+[val:125] mIoU=0.4913, pixAcc=0.8852
+[126/300] loss=0.1415
+[val:126] mIoU=0.4908, pixAcc=0.8871
+[127/300] loss=0.1410
+[val:127] mIoU=0.4983, pixAcc=0.8878
+[best:127] mIoU=0.4983, pixAcc=0.8878
+[128/300] loss=0.1393
+[val:128] mIoU=0.4947, pixAcc=0.8849
+[129/300] loss=0.3409
+[val:129] mIoU=0.2415, pixAcc=0.6420
+[130/300] loss=0.5442
+[val:130] mIoU=0.4379, pixAcc=0.8451
+[131/300] loss=0.1888
+[val:131] mIoU=0.4886, pixAcc=0.8788
+[132/300] loss=0.1528
+[val:132] mIoU=0.4948, pixAcc=0.8842
+[133/300] loss=0.1422
+[val:133] mIoU=0.4952, pixAcc=0.8885
+[134/300] loss=0.1364
+[val:134] mIoU=0.5028, pixAcc=0.8939
+[best:134] mIoU=0.5028, pixAcc=0.8939
+[135/300] loss=0.1339
+[val:135] mIoU=0.5026, pixAcc=0.8947
+[136/300] loss=0.1328
+[val:136] mIoU=0.4983, pixAcc=0.8906
+[137/300] loss=0.2867
+[val:137] mIoU=0.4848, pixAcc=0.8799
+[138/300] loss=0.1530
+[val:138] mIoU=0.5061, pixAcc=0.8961
+[best:138] mIoU=0.5061, pixAcc=0.8961
+[139/300] loss=0.1543
+[val:139] mIoU=0.4957, pixAcc=0.8874
+[140/300] loss=0.1310
+[val:140] mIoU=0.5009, pixAcc=0.8899
+[141/300] loss=0.1286
+[val:141] mIoU=0.5004, pixAcc=0.8901
+[142/300] loss=0.1285
+[val:142] mIoU=0.5105, pixAcc=0.8973
+[best:142] mIoU=0.5105, pixAcc=0.8973
+[143/300] loss=0.1257
+[val:143] mIoU=0.5067, pixAcc=0.8971
+[144/300] loss=0.1239
+[val:144] mIoU=0.5012, pixAcc=0.8915
+[145/300] loss=0.1229
+[val:145] mIoU=0.5027, pixAcc=0.8920
+[146/300] loss=0.3757
+[val:146] mIoU=0.4516, pixAcc=0.8518
+[147/300] loss=0.2387
+[val:147] mIoU=0.4965, pixAcc=0.8783
+[148/300] loss=0.1416
+[val:148] mIoU=0.5078, pixAcc=0.8963
+[149/300] loss=0.1261
+[val:149] mIoU=0.5056, pixAcc=0.8954
+[150/300] loss=0.1215
+[val:150] mIoU=0.5132, pixAcc=0.8978
+[best:150] mIoU=0.5132, pixAcc=0.8978
+[151/300] loss=0.1165
+[val:151] mIoU=0.5053, pixAcc=0.8982
+[152/300] loss=0.1156
+[val:152] mIoU=0.5078, pixAcc=0.8964
+[153/300] loss=0.1158
+[val:153] mIoU=0.5055, pixAcc=0.8959
+[154/300] loss=0.1153
+[val:154] mIoU=0.5009, pixAcc=0.8981
+[155/300] loss=0.1225
+[val:155] mIoU=0.3970, pixAcc=0.8290
+[156/300] loss=0.4157
+[val:156] mIoU=0.4984, pixAcc=0.8880
+[157/300] loss=0.1337
+[val:157] mIoU=0.5068, pixAcc=0.8928
+[158/300] loss=0.1180
+[val:158] mIoU=0.5094, pixAcc=0.8995
+[159/300] loss=0.1135
+[val:159] mIoU=0.5093, pixAcc=0.8979
+[160/300] loss=0.1099
+[val:160] mIoU=0.5100, pixAcc=0.8958
+[161/300] loss=0.1109
+[val:161] mIoU=0.5124, pixAcc=0.8986
+[162/300] loss=0.1085
+[val:162] mIoU=0.5058, pixAcc=0.8963
+[163/300] loss=0.1089
+[val:163] mIoU=0.5106, pixAcc=0.9013
+[164/300] loss=0.1089
+[val:164] mIoU=0.5124, pixAcc=0.9025
+[165/300] loss=0.1097
+[val:165] mIoU=0.5123, pixAcc=0.8969
+[166/300] loss=0.2169
+[val:166] mIoU=0.3572, pixAcc=0.7941
+[167/300] loss=0.3313
+[val:167] mIoU=0.4873, pixAcc=0.8837
+[168/300] loss=0.1307
+[val:168] mIoU=0.5062, pixAcc=0.8952
+[169/300] loss=0.1123
+[val:169] mIoU=0.5115, pixAcc=0.8973
+[170/300] loss=0.1064
+[val:170] mIoU=0.5141, pixAcc=0.8991
+[best:170] mIoU=0.5141, pixAcc=0.8991
+[171/300] loss=0.1029
+[val:171] mIoU=0.5154, pixAcc=0.9010
+[best:171] mIoU=0.5154, pixAcc=0.9010
+[172/300] loss=0.1016
+[val:172] mIoU=0.5187, pixAcc=0.9026
+[best:172] mIoU=0.5187, pixAcc=0.9026
+[173/300] loss=0.1001
+[val:173] mIoU=0.5180, pixAcc=0.9022
+[174/300] loss=0.1003
+[val:174] mIoU=0.5155, pixAcc=0.8988
+[175/300] loss=0.0994
+[val:175] mIoU=0.5201, pixAcc=0.9023
+[best:175] mIoU=0.5201, pixAcc=0.9023
+[176/300] loss=0.1011
+[val:176] mIoU=0.5135, pixAcc=0.9017
+[177/300] loss=0.1002
+[val:177] mIoU=0.5142, pixAcc=0.9010
+[178/300] loss=0.1043
+[val:178] mIoU=0.5195, pixAcc=0.9018
+[179/300] loss=0.2121
+[val:179] mIoU=0.4013, pixAcc=0.8147
+[180/300] loss=0.2396
+[val:180] mIoU=0.5116, pixAcc=0.8949
+[181/300] loss=0.1129
+[val:181] mIoU=0.5154, pixAcc=0.9002
+[182/300] loss=0.1018
+[val:182] mIoU=0.5174, pixAcc=0.9010
+[183/300] loss=0.0967
+[val:183] mIoU=0.5188, pixAcc=0.9006
+[184/300] loss=0.0943
+[val:184] mIoU=0.5175, pixAcc=0.9021
+[185/300] loss=0.0930
+[val:185] mIoU=0.5184, pixAcc=0.9030
+[186/300] loss=0.0929
+[val:186] mIoU=0.5207, pixAcc=0.9044
+[best:186] mIoU=0.5207, pixAcc=0.9044
+[187/300] loss=0.0926
+[val:187] mIoU=0.5208, pixAcc=0.9039
+[best:187] mIoU=0.5208, pixAcc=0.9039
+[188/300] loss=0.0918
+[val:188] mIoU=0.5152, pixAcc=0.9033
+[189/300] loss=0.0920
+[val:189] mIoU=0.5159, pixAcc=0.9025
+[190/300] loss=0.0926
+[val:190] mIoU=0.5220, pixAcc=0.9044
+[best:190] mIoU=0.5220, pixAcc=0.9044
+[191/300] loss=0.2345
+[val:191] mIoU=0.5045, pixAcc=0.8900
+[192/300] loss=0.1084
+[val:192] mIoU=0.5171, pixAcc=0.8993
+[193/300] loss=0.0946
+[val:193] mIoU=0.5196, pixAcc=0.9043
+[194/300] loss=0.0906
+[val:194] mIoU=0.5185, pixAcc=0.9049
+[195/300] loss=0.0888
+[val:195] mIoU=0.5202, pixAcc=0.9047
+[196/300] loss=0.0880
+[val:196] mIoU=0.5215, pixAcc=0.9061
+[197/300] loss=0.0864
+[val:197] mIoU=0.5233, pixAcc=0.9060
+[best:197] mIoU=0.5233, pixAcc=0.9060
+[198/300] loss=0.0865
+[val:198] mIoU=0.5246, pixAcc=0.9073
+[best:198] mIoU=0.5246, pixAcc=0.9073
+[199/300] loss=0.0861
+[val:199] mIoU=0.5211, pixAcc=0.9067
+[200/300] loss=0.0864
+[val:200] mIoU=0.5183, pixAcc=0.9046
+[201/300] loss=0.0875
+[val:201] mIoU=0.5209, pixAcc=0.9057
+[202/300] loss=0.0943
+[val:202] mIoU=0.5209, pixAcc=0.9041
+[203/300] loss=0.0914
+[val:203] mIoU=0.5151, pixAcc=0.9029
+[204/300] loss=0.0882
+[val:204] mIoU=0.5144, pixAcc=0.9016
+[205/300] loss=0.0867
+[val:205] mIoU=0.5208, pixAcc=0.9038
+[206/300] loss=0.1815
+[val:206] mIoU=0.5021, pixAcc=0.8906
+[207/300] loss=0.1564
+[val:207] mIoU=0.4868, pixAcc=0.8867
+[208/300] loss=0.1055
+[val:208] mIoU=0.5209, pixAcc=0.9017
+[209/300] loss=0.0871
+[val:209] mIoU=0.5226, pixAcc=0.9058
+[210/300] loss=0.0829
+[val:210] mIoU=0.5226, pixAcc=0.9056
+[211/300] loss=0.0809
+[val:211] mIoU=0.5232, pixAcc=0.9054
+[212/300] loss=0.0793
+[val:212] mIoU=0.5222, pixAcc=0.9059
+[213/300] loss=0.0783
+[val:213] mIoU=0.5196, pixAcc=0.9055
+[214/300] loss=0.0778
+[val:214] mIoU=0.5254, pixAcc=0.9062
+[best:214] mIoU=0.5254, pixAcc=0.9062
+[215/300] loss=0.0773
+[val:215] mIoU=0.5232, pixAcc=0.9076
+[216/300] loss=0.0778
+[val:216] mIoU=0.5248, pixAcc=0.9078
+[217/300] loss=0.0801
+[val:217] mIoU=0.5226, pixAcc=0.9054
+[218/300] loss=0.0788
+[val:218] mIoU=0.5244, pixAcc=0.9071
+[219/300] loss=0.0788
+[val:219] mIoU=0.5253, pixAcc=0.9067
+[220/300] loss=0.0778
+[val:220] mIoU=0.5262, pixAcc=0.9081
+[best:220] mIoU=0.5262, pixAcc=0.9081
+[221/300] loss=0.0781
+[val:221] mIoU=0.5211, pixAcc=0.9052
+[222/300] loss=0.0878
+[val:222] mIoU=0.5202, pixAcc=0.9042
+[223/300] loss=0.0801
+[val:223] mIoU=0.5223, pixAcc=0.9078
+[224/300] loss=0.0778
+[val:224] mIoU=0.5191, pixAcc=0.9041
+[225/300] loss=0.0764
+[val:225] mIoU=0.5227, pixAcc=0.9065
+[226/300] loss=0.0762
+[val:226] mIoU=0.5229, pixAcc=0.9070
+[227/300] loss=0.0768
+[val:227] mIoU=0.5164, pixAcc=0.8993
+[228/300] loss=0.0764
+[val:228] mIoU=0.5228, pixAcc=0.9073
+[229/300] loss=0.0743
+[val:229] mIoU=0.5249, pixAcc=0.9093
+[230/300] loss=0.1078
+[val:230] mIoU=0.5031, pixAcc=0.8913
+[231/300] loss=0.0966
+[val:231] mIoU=0.5209, pixAcc=0.9026
+[232/300] loss=0.0767
+[val:232] mIoU=0.5257, pixAcc=0.9078
+[233/300] loss=0.0726
+[val:233] mIoU=0.5217, pixAcc=0.9065
+[234/300] loss=0.0711
+[val:234] mIoU=0.5235, pixAcc=0.9074
+[235/300] loss=0.0698
+[val:235] mIoU=0.5254, pixAcc=0.9092
+[236/300] loss=0.0689
+[val:236] mIoU=0.5222, pixAcc=0.9081
+[237/300] loss=0.0689
+[val:237] mIoU=0.5251, pixAcc=0.9091
+[238/300] loss=0.0687
+[val:238] mIoU=0.5277, pixAcc=0.9097
+[best:238] mIoU=0.5277, pixAcc=0.9097
+[239/300] loss=0.0681
+[val:239] mIoU=0.5243, pixAcc=0.9086
+[240/300] loss=0.0689
+[val:240] mIoU=0.5243, pixAcc=0.9068
+[241/300] loss=0.0696
+[val:241] mIoU=0.5283, pixAcc=0.9091
+[best:241] mIoU=0.5283, pixAcc=0.9091
+[242/300] loss=0.0695
+[val:242] mIoU=0.5245, pixAcc=0.9082
+[243/300] loss=0.0701
+[val:243] mIoU=0.5268, pixAcc=0.9083
+[244/300] loss=0.0695
+[val:244] mIoU=0.5262, pixAcc=0.9092
+[245/300] loss=0.0689
+[val:245] mIoU=0.5210, pixAcc=0.9060
+[246/300] loss=0.0714
+[val:246] mIoU=0.5263, pixAcc=0.9085
+[247/300] loss=0.0685
+[val:247] mIoU=0.5258, pixAcc=0.9092
+[248/300] loss=0.0663
+[val:248] mIoU=0.5267, pixAcc=0.9095
+[249/300] loss=0.0658
+[val:249] mIoU=0.5259, pixAcc=0.9093
+[250/300] loss=0.0655
+[val:250] mIoU=0.5275, pixAcc=0.9094
+[251/300] loss=0.0651
+[val:251] mIoU=0.5281, pixAcc=0.9097
+[252/300] loss=0.0653
+[val:252] mIoU=0.5228, pixAcc=0.9080
+[253/300] loss=0.0648
+[val:253] mIoU=0.5267, pixAcc=0.9098
+[254/300] loss=0.0644
+[val:254] mIoU=0.5251, pixAcc=0.9089
+[255/300] loss=0.0637
+[val:255] mIoU=0.5266, pixAcc=0.9101
+[256/300] loss=0.0631
+[val:256] mIoU=0.5251, pixAcc=0.9090
+[257/300] loss=0.0632
+[val:257] mIoU=0.5252, pixAcc=0.9096
+[258/300] loss=0.0646
+[val:258] mIoU=0.5267, pixAcc=0.9100
+[259/300] loss=0.0630
+[val:259] mIoU=0.5256, pixAcc=0.9093
+[260/300] loss=0.0623
+[val:260] mIoU=0.5272, pixAcc=0.9109
+[261/300] loss=0.0614
+[val:261] mIoU=0.5277, pixAcc=0.9102
+[262/300] loss=0.0612
+[val:262] mIoU=0.5260, pixAcc=0.9105
+[263/300] loss=0.0605
+[val:263] mIoU=0.5266, pixAcc=0.9103
+[264/300] loss=0.0607
+[val:264] mIoU=0.5286, pixAcc=0.9114
+[best:264] mIoU=0.5286, pixAcc=0.9114
+[265/300] loss=0.0598
+[val:265] mIoU=0.5294, pixAcc=0.9116
+[best:265] mIoU=0.5294, pixAcc=0.9116
+[266/300] loss=0.0597
+[val:266] mIoU=0.5281, pixAcc=0.9112
+[267/300] loss=0.0595
+[val:267] mIoU=0.5266, pixAcc=0.9115
+[268/300] loss=0.0592
+[val:268] mIoU=0.5275, pixAcc=0.9111
+[269/300] loss=0.0588
+[val:269] mIoU=0.5293, pixAcc=0.9122
+[270/300] loss=0.0588
+[val:270] mIoU=0.5256, pixAcc=0.9110
+[271/300] loss=0.0582
+[val:271] mIoU=0.5250, pixAcc=0.9110
+[272/300] loss=0.0584
+[val:272] mIoU=0.5287, pixAcc=0.9111
+[273/300] loss=0.0579
+[val:273] mIoU=0.5273, pixAcc=0.9107
+[274/300] loss=0.0571
+[val:274] mIoU=0.5254, pixAcc=0.9107
+[275/300] loss=0.0569
+[val:275] mIoU=0.5263, pixAcc=0.9103
+[276/300] loss=0.0568
+[val:276] mIoU=0.5263, pixAcc=0.9115
+[277/300] loss=0.0564
+[val:277] mIoU=0.5267, pixAcc=0.9109
+[278/300] loss=0.0563
+[val:278] mIoU=0.5271, pixAcc=0.9115
+[279/300] loss=0.0558
+[val:279] mIoU=0.5262, pixAcc=0.9111
+[280/300] loss=0.0552
+[val:280] mIoU=0.5275, pixAcc=0.9112
+[281/300] loss=0.0551
+[val:281] mIoU=0.5265, pixAcc=0.9110
+[282/300] loss=0.0548
+[val:282] mIoU=0.5268, pixAcc=0.9116
+[283/300] loss=0.0546
+[val:283] mIoU=0.5265, pixAcc=0.9118
+[284/300] loss=0.0545
+[val:284] mIoU=0.5272, pixAcc=0.9123
+[285/300] loss=0.0541
+[val:285] mIoU=0.5254, pixAcc=0.9111
+[286/300] loss=0.0541
+[val:286] mIoU=0.5262, pixAcc=0.9117
+[287/300] loss=0.0537
+[val:287] mIoU=0.5258, pixAcc=0.9112
+[288/300] loss=0.0539
+[val:288] mIoU=0.5268, pixAcc=0.9119
+[289/300] loss=0.0533
+[val:289] mIoU=0.5260, pixAcc=0.9114
+[290/300] loss=0.0531
+[val:290] mIoU=0.5265, pixAcc=0.9117
+[291/300] loss=0.0530
+[val:291] mIoU=0.5266, pixAcc=0.9118
+[292/300] loss=0.0528
+[val:292] mIoU=0.5260, pixAcc=0.9116
+[293/300] loss=0.0526
+[val:293] mIoU=0.5268, pixAcc=0.9119
+[294/300] loss=0.0527
+[val:294] mIoU=0.5264, pixAcc=0.9118
+[295/300] loss=0.0523
+[val:295] mIoU=0.5263, pixAcc=0.9119
+[296/300] loss=0.0524
+[val:296] mIoU=0.5263, pixAcc=0.9118
+[297/300] loss=0.0521
+[val:297] mIoU=0.5264, pixAcc=0.9120
+[298/300] loss=0.0519
+[val:298] mIoU=0.5260, pixAcc=0.9118
+[299/300] loss=0.0521
+[val:299] mIoU=0.5262, pixAcc=0.9119
+[300/300] loss=0.0518
+[val:300] mIoU=0.5264, pixAcc=0.9120

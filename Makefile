@@ -1,28 +1,35 @@
-PY=python
-DATE=$(shell date +"%Y%m%d-%H%M%S")
-EXPDIR=experiments/$(DATE)
+PYTHON ?= python
+SEG_CONFIG ?= configs/segmentation.yaml
+SEMGAN_CONFIG ?= configs/semgan.yaml
+GPUS ?= 1
+MASTER_PORT ?= 29503
+CHECKPOINT ?= checkpoints/semgan_prop5k.pt
+DIRECTION ?= day2night
+INPUT_DIR ?= data/testA
+OUTPUT_DIR ?= results/inference
 
+.PHONY: setup check test train-seg train-seg-ddp train-translation train-translation-ddp infer
 
-.PHONY: env train-seg train-gan eval-fid demo
+setup:
+	VENV_DIR="$(CURDIR)/semgan310" ./scripts/setup_env.sh
 
+check:
+	$(PYTHON) scripts/check_environment.py
 
-env:
-@echo "Using system env. Ensure PyTorch+CUDA installed."
-
+test:
+	$(PYTHON) -m unittest discover -s tests -v
 
 train-seg:
-mkdir -p $(EXPDIR)
-$(PY) -m src.train_seg --config configs/seg.yaml --out $(EXPDIR)
+	$(PYTHON) -m src.train_seg --config $(SEG_CONFIG)
 
+train-seg-ddp:
+	torchrun --nproc_per_node=$(GPUS) --master_port=$(MASTER_PORT) -m src.train_seg --config $(SEG_CONFIG)
 
-train-gan:
-mkdir -p $(EXPDIR)
-$(PY) -m src.train_gan --config configs/gan.yaml --out $(EXPDIR)
+train-translation:
+	$(PYTHON) -m src.train_cyclegan --config $(SEMGAN_CONFIG)
 
+train-translation-ddp:
+	torchrun --nproc_per_node=$(GPUS) --master_port=$(MASTER_PORT) -m src.train_cyclegan --config $(SEMGAN_CONFIG)
 
-eval-fid:
-$(PY) -m src.eval_fid --real data/bdd/night/ --fake results/images/
-
-
-demo:
-$(PY) -c "print('Run notebooks/main_pipeline.ipynb for the full E2E demo.')"
+infer:
+	$(PYTHON) -m src.apply_cyclegan --config $(SEMGAN_CONFIG) --checkpoint $(CHECKPOINT) --direction $(DIRECTION) --input-dir $(INPUT_DIR) --output-dir $(OUTPUT_DIR)

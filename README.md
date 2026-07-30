@@ -1,119 +1,299 @@
-python3.12 -m venv .venv
+# SemGAN Day-to-Night Image Translation
+
+Research code for unpaired day-to-night and night-to-day image translation with
+semantic consistency. The repository contains the training and inference
+pipeline used for the final thesis experiment; datasets and model weights are
+kept outside Git.
+
+## Method
+
+The method combines three components:
+
+```text
+Cityscapes labels ──> segmentation pretraining ──> frozen generator encoder
+                                                        │
+unpaired day/night images ──> CycleGAN (G and F) <───────┘
+                                  │
+                                  └──> frozen DTBS segmenter
+                                       └──> bidirectional semantic loss
+```
+
+1. A nine-residual-block segmentation network is pretrained on Cityscapes.
+   Its best encoder weights initialize the day-to-night generator `G` and
+   remain frozen during translation training. The reverse generator `F`
+   starts from a random, trainable encoder.
+2. Two generators learn day-to-night (`G`) and night-to-day (`F`) mappings.
+   Two PatchGAN discriminators, least-squares adversarial loss, cycle
+   consistency, identity preservation, and an image replay pool stabilize
+   unpaired training.
+3. A frozen DTBS Cityscapes-to-ACDC-night segmenter supplies a semantic
+   consistency loss for both translation directions. The final experiment uses
+   an L1 distance between class-probability maps.
+
+## Final thesis configuration
+
+The two versioned configurations reproduce the selected proportional runs:
+`configs/segmentation.yaml` for the `seg_prop` encoder and
+`configs/semgan.yaml` for the final `semgan_prop5k` translation. In both
+training pipelines, the integer `resize: 572` preserves the aspect ratio
+before a 512 x 512 crop.
+
+| Component | Final setting |
+| --- | --- |
+| Translation data | 5,000 training + 1,000 held-out images per domain, balanced across five luminance quantiles |
+| Training transform | resize shorter side to 572 px, random 512 x 512 crop, horizontal flip |
+| Encoder pretraining | `seg_prop`; all 2,975 Cityscapes training images; proportional resize/crop; 9 residual blocks; 300 epochs; batch 8 |
+| Generator | frozen transferred encoder for day-to-night only; 9 encoder residual blocks; no additional decoder residual blocks |
+| Discriminator | four-layer PatchGAN, LSGAN objective |
+| Cycle / identity loss | 10.0 / 5.0 |
+| Semantic loss | DTBS, both directions, L1 probability loss, weight 1.0 |
+| Translation schedule | 300 epochs, linear decay from epoch 150, batch 1, replay pool 50, AMP |
+| Optimizers | Adam; generator 2e-4, discriminator 1e-4 |
+
+## Repository layout
+
+```text
+configs/segmentation.yaml final encoder-pretraining settings
+configs/semgan.yaml        final semantic CycleGAN settings
+src/train_seg.py           encoder pretraining
+src/train_cyclegan.py      CycleGAN + semantic-consistency training
+src/apply_cyclegan.py      minimal translation inference CLI
+src/apply_segnet.py        segmentation inference/visualization CLI
+scripts/setup_env.sh       reproducible Python 3.10 environment setup
+scripts/score_images.py    luminance metadata generation
+scripts/prepare_dataset.py reproducible five-bucket split
+data/README.md             dataset layout and BDD100K example
+checkpoints/README.md      required checkpoint files
+```
+
+Runtime outputs are written to `experiments/` and `results/`; both are
+ignored by Git.
+
+## Requirements and environment
+
+The tested environment is Python 3.10 with PyTorch 2.5.1, torchvision 0.20.1,
+CUDA 12.1 wheels, MMCV 1.4.0, and the DTBS MMSegmentation 0.16.0 source tree.
+Training requires an NVIDIA CUDA setup with sufficient memory for 512 x 512
+crops.
+
+To create a virtual environment named `semgan310`, install the pinned
+requirements, clone DTBS, and check the imports:
+
+```bash
+VENV_DIR="$PWD/semgan310" ./scripts/setup_env.sh
+source semgan310/bin/activate
+```
+
+For the conventional `.venv` name, simply run:
+
+```bash
+./scripts/setup_env.sh
 source .venv/bin/activate
-pip install --upgrade pip
-
-# Uses the cu121 extra index
-pip install -r requirements.txt
-
-## CycleGAN Day↔Night Training
-
-1. Legen Sie Ihre Tages- und Nachtbilder unter `data/day` bzw. `data/night` ab (kann in `configs/cyclegan.yaml` angepasst werden). (1000 bilder each!)
-2. Legen Sie die trainierten Encoder-Gewichte aus der Segmentierung bereit. Setzen Sie `model.generator.encoder_checkpoint` auf
-   - `latest` (Standard, nimmt den jüngsten `experiments/seg_*/encoder_GE.pth`),
-   - `latest:<glob>` für eigene Muster (z. B. `latest:seg_cityscapes_*`),
-   - oder einen konkreten Pfad/Ordner mit `encoder_GE.pth`.
-   Der Checkpoint wird nur verwendet, wenn `model.generator.freeze_encoder: true` ist; bei `false` startet `G` zufällig initialisiert.
-3. Optional: Passen Sie Hyperparameter, Pfade oder Augmentationen in `configs/cyclegan.yaml` an.
-4. Starten Sie das Training (200 Epochen, davon 100 konstant, danach lineare LR-Absenkung):
-
-   - Für den Einzelprozessor-Workflow:
-
-     ```bash
-     python -m src.train_cyclegan --config configs/cyclegan.yaml
-     ```
-
-   - Für Multi-GPU mit DDP (empfohlen auf 8 GPUs, Batch 1/Prozess):
-
-     ```bash
-     torchrun --nproc_per_node=8 -m src.train_cyclegan --config configs/cyclegan.yaml
-     ```
-
-Checkpoints werden unter `experiments/` abgelegt (inkl. Generatoren G/F und Discriminatoren Ds/Dt).
-
-- **Stabilitäts-Tuning:** Standardmäßig läuft TTUR (G = 2e‑4, D = 1e‑4), die Discriminatoren können optional per SpectralNorm verstärkt werden (`model.discriminator.use_spectral_norm`) und ein Replay-Buffer (`train.image_pool_size`, default 50) glättet das D-Training.
-- **Sky-Identity-Loss (optional):** Setze `sky_loss.enabled: true` in `configs/cyclegan.yaml`, trage `class_ids` (z. B. Cityscapes sky=10, vegetation=8). `seg_checkpoint: null`/`latest` sucht automatisch das jüngste `experiments/seg_*/segnet_full.pth` (oder setze explizit einen Pfad). Der Loss bremst neue Punktlichter im Himmel/Baum-Bereich für Day→Night, mit optionaler Glättung (`tv_weight`).
-
-### Segmentierungs‑Pretraining (Encoder)
-
-Die CycleGAN‑Generatoren nutzen einen Encoder, der zuvor auf Cityscapes segmentiert wurde. Trainiert ihn mit:
-
-```bash
-python -m src.train_seg --config configs/seg.yaml
 ```
 
-Für Multi‑GPU‑Training empfiehlt sich DDP via `torchrun` (analog zu CycleGAN). Das Skript erkennt `WORLD_SIZE` automatisch:
+The setup searches for a Python 3.10 interpreter. If it is installed through
+Conda, pyenv, or a non-standard system path, pass it explicitly:
 
 ```bash
-torchrun --nproc_per_node=8 -m src.train_seg --config configs/seg.yaml
+PYTHON_BIN=/absolute/path/to/python3.10 \
+  VENV_DIR="$PWD/semgan310" \
+  ./scripts/setup_env.sh
 ```
 
-Der Encoder-Checkpoint landet standardmäßig unter `experiments/<seg_run>/encoder_GE.pth`. `configs/cyclegan.yaml` greift automatisch auf den jüngsten `seg_*`-Lauf zu (`encoder_checkpoint: latest`), kann bei Bedarf aber weiterhin auf einen festen Pfad zeigen.
-
-**Andere Datensätze:** Über `data.dataset` lässt sich der Seg-Loader umschalten (`"cityscapes"` oder `"bdd100k"`). Für BDD müssen zudem passende `train_images`/`train_masks` angegeben werden; optional begrenzt `data.extensions` die erlaubten Dateiendungen.
-
-## BDD100K Subset (optional)
-
-Erstelle ein kleines CycleGAN-Trainingsset aus BDD100K:
+DTBS is not included in this Git repository. The setup script automatically
+clones it under `third_party/DTBS` and checks out commit
+`ea92f6910a1b36c12625a54789cdeb6a6e5dbff4`. It is kept as an external
+dependency because its upstream repository does not declare a source license.
+Verify an existing environment at any time with:
 
 ```bash
-python data/smallset_bdd.py --root data/bdd100k --n 1000
+python scripts/check_environment.py
 ```
 
-## CycleGAN Inference
-
-Einfachere Eingabe‑/Ausgabe-Pfade und die Anwendung eines gespeicherten Generators bietet das neue Skript `src.apply_cyclegan`.
-
-1. Legt eure Eingabebilder in ein beliebiges Verzeichnis (z. B. `data/night2day/night_to_day/testA` für Tagesbilder oder `testB` für Nachtbilder).
-2. Gebt optional den Checkpoint an, sonst wird automatisch das jüngste `latest.pt` aus `experiments/{exp_name}_*/` geladen (Fallback: `best.pt`, dann `epoch_*.pt`).
-3. Führt z. B. aus:
-
-   ```bash
-   python -m src.apply_cyclegan \
-     --direction day2night \
-     --input-dir data/night2day/night_to_day/testA \
-     --checkpoint experiments/cyclegan_day2night_20251110_163433/best.pt \
-     --output-dir results/cyclegan_inference
-   ```
-
-   Die generierten Bilder landen unter `results/cyclegan_inference/day2night` (bzw. `.../night2day` bei der umgekehrten Richtung).
-
-Weitere Optionen:
-
-- `--config`: Pfad zur Konfigurationsdatei (Standard `configs/cyclegan.yaml`).
-- `--extensions`: Erweiterungen, die durchsucht werden sollen (Standard aus der Konfiguration oder `jpg/jpeg/png/...`).
-- Helligkeit steuern: In `configs/cyclegan.yaml` unter `inference` kannst du `brightness_gain` (linear, z. B. 1.15) und `output_gamma` (Gamma-Korrektur, z. B. 1.1) setzen, um Day→Night‑Ergebnisse aufzuhellen. Beide sind standardmäßig 1.0 (keine Änderung).
-
-Der angegebene `--root` sollte direkt die Unterordner `images/` und `labels/` enthalten. Liegen keine `labels/bdd100k_labels_images_*.json` (mit `attributes.timeofday`) vor, kannst du mit `--heuristic` eine simple Helligkeits-Heuristik nutzen (optional `--threshold`, z. B. `0.5`). Mit `--copy` anstelle von Symlinks werden echte Dateien erzeugt.
-
-### Test-Split erstellen
-
-Sobald `trainA/trainB` stehen, kannst du über den Val-Split (oder bisher ungenutzte Train-Bilder) einen disjunkten Test-Satz erzeugen:
+Run the repository regression tests after setup:
 
 ```bash
-python data/make_test_split_bdd.py --root data/bdd100k --n 1000
+make test
 ```
 
-Das Skript liest `labels/bdd100k_labels_images_{train,val}.json`, vermeidet Überschneidungen mit bestehenden `cyclegan/train*`, bevorzugt `val` und erstellt `cyclegan/testA` (Tag) und `testB` (Nacht). `--copy` erzwingt Kopien statt Symlinks.
+They validate both final configs, deterministic dataset preparation, encoder
+weight transfer, and core model tensor shapes without starting a training run.
 
-Kurze Torchrun-Befehle:
+## Data and checkpoints
 
-- SegNet DDP: `torchrun --nproc_per_node=8 -m src.train_seg --config configs/seg.yaml`
-- CycleGAN DDP: `torchrun --nproc_per_node=8 -m src.train_cyclegan --config configs/cyclegan.yaml`
-torchrun --nproc_per_node=8 -m src.train_seg --config configs/seg.yaml
-torchrun --nproc_per_node=8 -m src.train_cyclegan --config configs/cyclegan.yaml
+Follow [data/README.md](data/README.md) to create:
 
+```text
+data/trainA  data/trainB  data/testA  data/testB
+```
 
-torchrun --nproc_per_node=4 -m src.train_cyclegan --config configs/cyclegan.yaml --resume experiments/cyclegan_day2night_20251204_184245/latest.pt
+The same guide documents the exact luminance-balanced 5k split and a complete
+BDD100K example. Encoder pretraining additionally requires the official
+Cityscapes `leftImg8bit` and `gtFine` trees.
 
-CUDA_VISIBLE_DEVICES=0,1,2 torchrun --nproc_per_node=4 -m src.train_seg --config configs/seg.yaml
-CUDA_VISIBLE_DEVICES=4,5,6,7 torchrun --nproc_per_node=4 -m src.train_cyclegan --config configs/cyclegan.yaml --resume experiments/cyclegan_day2night_20251207_185813/latest.pt
+Follow [checkpoints/README.md](checkpoints/README.md) for the three expected
+weight files:
 
-torchrun --nproc_per_node=4 --master_port=29503 -m src.train_cyclegan --config configs/cyclegan.yaml/tmp/wait_for_gpu\ copy.sh.
+```text
+checkpoints/encoder_GE.pth
+checkpoints/dtbs/cs2acdc_latest.pth
+checkpoints/semgan_prop5k.pt
+```
 
+Only the first two are needed to start translation training. The complete
+`semgan_prop5k.pt` file is used for final-run inference and already contains
+both translation generators. The optional notebook reference
+`checkpoints/lastchance_semgan_20260613_023510_latest.pt` is a separate
+epoch-200, 1,500-image run and is not required for training.
 
-torchrun --nproc_per_node=4 --master_port=29503 -m src.train_seg --config configs/seg.yaml
-torchrun --nproc_per_node=4 --master_port=29503 -m src.train_cyclegan --config configs/cyclegan.yaml
+## Training
 
-CUDA_VISIBLE_DEVICES=1,2,3,4 torchrun --nproc_per_node=4 --master_port=29503 -m src.train_cyclegan --config "configs/cyclegan snow.yaml" 
+Run every command from the repository root with the virtual environment
+activated.
 
-CUDA_VISIBLE_DEVICES=2,4,5,6,7 torchrun --nproc_per_node=4 -m src.train_cyclegan --config configs/cyclegan.yaml
+### 1. Pretrain the segmentation encoder
+
+Single GPU:
+
+```bash
+python -m src.train_seg --config configs/segmentation.yaml
+```
+
+Four GPUs with DistributedDataParallel:
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun \
+  --nproc_per_node=4 \
+  --master_port=29503 \
+  -m src.train_seg \
+  --config configs/segmentation.yaml
+```
+
+The best validation model is written to
+`experiments/seg_prop_<timestamp>/encoder_GE.pth` together with the full
+segmentation model `segnet_full.pth`. The final thesis run used all 2,975
+images in the official Cityscapes training split; `sample_n_train: 5000` was
+an upper bound and did not subsample that split.
+
+The encoder used by the final SemGAN run came exactly from
+`experiments/seg_prop_20260626_115203/encoder_GE.pth`. Its 21 tensors match
+the frozen encoder stored in generator `G` of the epoch-300 checkpoint.
+Copy a reproduced encoder to the reusable path configured in `semgan.yaml`:
+
+```bash
+cp experiments/seg_prop_<timestamp>/encoder_GE.pth checkpoints/encoder_GE.pth
+```
+
+### 2. Train semantic CycleGAN
+
+Single GPU:
+
+```bash
+python -m src.train_cyclegan --config configs/semgan.yaml
+```
+
+Four GPUs:
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun \
+  --nproc_per_node=4 \
+  --master_port=29504 \
+  -m src.train_cyclegan \
+  --config configs/semgan.yaml
+```
+
+Choose a unique `--master_port` for every simultaneous `torchrun` job on the
+same host. The global batch size equals `train.batch_size` from `semgan.yaml` times
+the number of processes.
+
+Resume a run with the same process count:
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun \
+  --nproc_per_node=4 \
+  --master_port=29504 \
+  -m src.train_cyclegan \
+  --config configs/semgan.yaml \
+  --resume experiments/semgan_prop5k_<timestamp>/latest.pt
+```
+
+Each run stores `latest.pt`, the lowest-generator-loss `best.pt`, the
+resolved config, and logs below `experiments/semgan_prop5k_<timestamp>/`.
+Epoch checkpoints are disabled in the final configuration to avoid redundant
+large files.
+
+Equivalent shortcuts are available through `make train-seg`,
+`make train-translation`, `make train-seg-ddp GPUS=4 MASTER_PORT=29503`, and
+`make train-translation-ddp GPUS=4 MASTER_PORT=29504`.
+
+## Inference
+
+The CLI is the canonical inference path. The optional, output-free
+[inference notebook](notebooks/inference_demo.ipynb) uses the same tested
+loading and transformation helpers, selects ten random images with a fixed
+seed, generates only those samples, resizes each generated image back to the
+corresponding input resolution with bicubic interpolation, and displays every
+input/output pair in one two-column comparison figure.
+
+Day to night:
+
+```bash
+python -m src.apply_cyclegan \
+  --config configs/semgan.yaml \
+  --checkpoint checkpoints/semgan_prop5k.pt \
+  --direction day2night \
+  --input-dir /path/to/day-images \
+  --output-dir results/inference
+```
+
+Night to day:
+
+```bash
+python -m src.apply_cyclegan \
+  --config configs/semgan.yaml \
+  --checkpoint checkpoints/semgan_prop5k.pt \
+  --direction night2day \
+  --input-dir /path/to/night-images \
+  --output-dir results/inference
+```
+
+Generated files preserve their relative input paths below
+`results/inference/<direction>/`. Inference from a complete CycleGAN
+checkpoint does not load the encoder-pretraining or DTBS checkpoint.
+
+To inspect the full segmentation model:
+
+```bash
+python -m src.apply_segnet \
+  --config configs/segmentation.yaml \
+  --checkpoint experiments/seg_prop_<timestamp>/segnet_full.pth \
+  --input-dir /path/to/images \
+  --output-dir results/segmentation
+```
+
+## Reproducibility notes
+
+- Random seeds are stored in the config; data preparation additionally writes
+  explicit selection manifests.
+- The complete translation checkpoint embeds the resolved translation config.
+- Dataset redistribution is intentionally avoided. Record the dataset versions,
+  licenses, and generated manifests with any released model.
+- CUDA kernels and multi-GPU scheduling can still introduce small numerical
+  differences between runs.
+- Large checkpoints should be attached to a release or archival record rather
+  than committed to Git.
+
+## External projects and datasets
+
+This work builds on [CycleGAN](https://junyanz.github.io/CycleGAN/),
+[DTBS](https://github.com/hf618/DTBS),
+[Cityscapes](https://www.cityscapes-dataset.com/), and
+[BDD100K](https://www.vis.xyz/bdd100k/). Cite and follow the terms of the
+projects and datasets used in a reproduction.
+
+## Citation and license
+
+If you use this repository, cite the master's thesis using the metadata in
+[`CITATION.cff`](CITATION.cff). The source code is released under the
+[`MIT License`](LICENSE). External software, models, and datasets remain subject
+to their own license and usage terms.

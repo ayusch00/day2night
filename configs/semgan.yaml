@@ -1,0 +1,90 @@
+# Final proportional SemGAN-5k configuration.
+# The encoder checkpoint is the best encoder from the segmentation.yaml
+# seg_prop run; the verified thesis run used seg_prop_20260626_115203.
+exp_name: semgan_prop5k
+
+data:
+  day_dir: data/trainA
+  night_dir: data/trainB
+  test_day_dir: data/testA
+  test_night_dir: data/testB
+  extensions: [jpg, jpeg, png]
+  sample_limit: 5000
+
+transforms:
+  # Integer resize preserves aspect ratio before the random 512 px crop.
+  resize: 572
+  random_crop: 512
+  center_crop: null
+  random_flip: true
+
+model:
+  generator:
+    in_channels: 3
+    out_channels: 3
+    base_channels: 64
+    n_res_blocks: 9
+    use_skip: true
+    encoder_checkpoint: checkpoints/encoder_GE.pth
+    encoder_transfer_directions: [day2night]
+    freeze_encoder: true
+    decoder_res_blocks: 0
+  discriminator:
+    in_channels: 3
+    base_channels: 64
+    n_layers: 4
+    max_channels: 512
+    use_spectral_norm: false
+
+loss:
+  lambda_cycle: 10.0
+  lambda_identity: 5.0
+
+semgan:
+  use_semgan: true
+  lambda_sem: 1.0
+  sem_loss_type: l1_prob
+  apply_on: [A2B, B2A]
+  num_classes: 19
+  ignore_index: 255
+  seg_checkpoint: checkpoints/dtbs/cs2acdc_latest.pth
+  seg_config_json: third_party/DTBS/work_dirs/acdc/acdc_pretrained.json
+  seg_input_norm: imagenet
+  seg_inference_size: null
+  cache_seg_logits: false
+
+optim:
+  generator:
+    lr: 2.0e-4
+    betas: [0.5, 0.999]
+  discriminator:
+    lr: 1.0e-4
+    betas: [0.5, 0.999]
+
+train:
+  epochs: 300
+  batch_size: 1
+  workers: 4
+  seed: 42
+  lr_decay_start: 150
+  amp: true
+  image_pool_size: 50
+
+inference:
+  checkpoint: checkpoints/semgan_prop5k.pt
+  transforms:
+    resize: [512, 512]
+    center_crop: null
+  brightness_gain: 1.0
+  output_gamma: 1.0
+
+logging:
+  out_dir: experiments
+  results_dir: results
+  save_every: 1
+  latest_checkpoint_name: latest.pt
+  best_checkpoint_name: best.pt
+  keep_epoch_checkpoints: false
+  best_metric: g_total
+  best_metric_mode: min
+  log_interval: 100

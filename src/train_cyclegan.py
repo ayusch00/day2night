@@ -477,12 +477,9 @@ class ImagePool:
         return torch.cat(out, dim=0)
 
 
-def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
+def train(cfg_path: str = "configs/semgan.yaml", resume: str | None = None):
     cfg_path = os.path.abspath(cfg_path)
     cfg = load_cfg(cfg_path)
-    # SemGAN usage:
-    #   python -m src.train_cyclegan --config configs/semgan.yaml
-    # Requires semgan.use_semgan=true plus semgan.seg_config_json and semgan.seg_checkpoint.
     resume_ckpt = resume or cfg.get("train", {}).get("resume_checkpoint")
     distributed, local_rank = init_distributed_if_needed()
     rank = dist.get_rank() if distributed else 0
@@ -532,7 +529,18 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
     gen_cfg = cfg["model"]["generator"]
     disc_cfg = cfg["model"]["discriminator"]
 
-    freeze_encoder = gen_cfg.get("freeze_encoder", False)
+    freeze_encoder = bool(gen_cfg.get("freeze_encoder", False))
+    raw_transfer_directions = gen_cfg.get("encoder_transfer_directions", ["day2night"])
+    if not isinstance(raw_transfer_directions, (list, tuple, set)):
+        raise ValueError("model.generator.encoder_transfer_directions must be a list.")
+    transfer_directions = {str(direction) for direction in raw_transfer_directions}
+    unknown_directions = transfer_directions - {"day2night", "night2day"}
+    if unknown_directions:
+        raise ValueError(
+            "Unsupported encoder transfer directions: "
+            f"{sorted(unknown_directions)}"
+        )
+
     encoder_ckpt = (
         resolve_encoder_checkpoint(
             gen_cfg.get("encoder_checkpoint"),
@@ -540,16 +548,16 @@ def train(cfg_path: str = "configs/cyclegan.yaml", resume: str | None = None):
             default_run_prefix=gen_cfg.get("encoder_run_prefix", "seg"),
             filename=gen_cfg.get("encoder_filename", "encoder_GE.pth"),
         )
-        if freeze_encoder
+        if freeze_encoder and transfer_directions
         else None
     )
     decoder_res_blocks = gen_cfg.get("decoder_res_blocks", 3)
 
-    # G uses the segmentation encoder only when freeze_encoder is true; otherwise it starts random.
-    g_encoder_ckpt = encoder_ckpt
-    g_freeze_encoder = freeze_encoder
-    f_encoder_ckpt = None
-    f_freeze_encoder = False
+    # The final thesis run transferred the encoder only to G (day-to-night).
+    g_encoder_ckpt = encoder_ckpt if "day2night" in transfer_directions else None
+    g_freeze_encoder = freeze_encoder and g_encoder_ckpt is not None
+    f_encoder_ckpt = encoder_ckpt if "night2day" in transfer_directions else None
+    f_freeze_encoder = freeze_encoder and f_encoder_ckpt is not None
     if is_main:
         print(f"[CycleGAN] G (day->night) encoder: {g_encoder_ckpt or 'None'} | freeze={g_freeze_encoder}")
         print(f"[CycleGAN] F (night->day) encoder: {f_encoder_ckpt or 'None'} | freeze={f_freeze_encoder}")
@@ -1130,7 +1138,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", "-c", default="configs/cyclegan.yaml")
+    parser.add_argument("--config", "-c", default="configs/semgan.yaml")
     parser.add_argument(
         "--resume",
         help="Path to checkpoint (e.g. latest.pt or best.pt) to resume training.",

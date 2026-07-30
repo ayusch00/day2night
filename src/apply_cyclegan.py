@@ -10,13 +10,14 @@ from torchvision import transforms
 from torchvision.transforms import InterpolationMode
 
 from src.models.cyclegan import CycleGANGenerator
-from src.utils.common import load_cfg, resolve_encoder_checkpoint
+from src.utils.common import load_cfg
 
 SUPPORTED_EXTENSIONS: Sequence[str] = ("jpg", "jpeg", "png", "bmp", "tif", "tiff")
 
 
 def build_inference_transform(cfg: dict) -> transforms.Compose:
-    tf_cfg = cfg.get("transforms", {})
+    inference_cfg = cfg.get("inference", {})
+    tf_cfg = inference_cfg.get("transforms", cfg.get("transforms", {}))
     resize = tf_cfg.get("resize")
     center_crop = tf_cfg.get("center_crop")
     ops: list = []
@@ -87,19 +88,10 @@ def find_checkpoint(checkpoint: str | None, cfg: dict) -> Path:
 def build_generator(cfg: dict, device: torch.device, direction: str) -> CycleGANGenerator:
     gen_cfg = cfg["model"]["generator"]
     freeze_encoder = gen_cfg.get("freeze_encoder", False) if direction == "day2night" else False
-    encoder_for_direction = (
-        resolve_encoder_checkpoint(
-            gen_cfg.get("encoder_checkpoint"),
-            experiments_root=cfg["logging"].get("out_dir", "experiments"),
-            default_run_prefix=gen_cfg.get("encoder_run_prefix", "seg"),
-            filename=gen_cfg.get("encoder_filename", "encoder_GE.pth"),
-        )
-        if freeze_encoder
-        else None
-    )
-    print(
-        f"Building {direction} generator | encoder: {encoder_for_direction or 'None'} | freeze={freeze_encoder}"
-    )
+    # Complete CycleGAN checkpoints already contain the encoder weights. Loading
+    # the earlier segmentation checkpoint would add a needless inference dependency.
+    encoder_for_direction = None
+    print(f"Building {direction} generator from full CycleGAN checkpoint")
     return CycleGANGenerator(
         in_channels=gen_cfg.get("in_channels", 3),
         out_channels=gen_cfg.get("out_channels", 3),
@@ -158,7 +150,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Apply a trained CycleGAN generator to convert between day/night domains."
     )
-    parser.add_argument("--config", "-c", default="configs/cyclegan.yaml")
+    parser.add_argument("--config", "-c", default="configs/semgan.yaml")
     parser.add_argument(
         "--checkpoint",
         "-k",
@@ -192,7 +184,8 @@ def main() -> None:
 
     cfg = load_cfg(args.config)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    checkpoint = find_checkpoint(args.checkpoint, cfg)
+    inference_cfg = cfg.get("inference", {})
+    checkpoint = find_checkpoint(args.checkpoint or inference_cfg.get("checkpoint"), cfg)
     transform = build_inference_transform(cfg)
     extensions = (
         [ext.lower().lstrip(".") for ext in args.extensions]
@@ -200,7 +193,6 @@ def main() -> None:
         else cfg["data"].get("extensions", SUPPORTED_EXTENSIONS)
     )
 
-    inference_cfg = cfg.get("inference", {})
     brightness_gain = float(inference_cfg.get("brightness_gain", 1.0))
     output_gamma = float(inference_cfg.get("output_gamma", 1.0))
     if brightness_gain <= 0:
@@ -209,8 +201,8 @@ def main() -> None:
         raise ValueError("inference.output_gamma must be > 0.")
 
     default_inputs = {
-        "day2night": Path("data/night2day/night_to_day/testA"),
-        "night2day": Path("data/night2day/night_to_day/testB"),
+        "day2night": Path(cfg["data"].get("test_day_dir", "data/testA")),
+        "night2day": Path(cfg["data"].get("test_night_dir", "data/testB")),
     }
     input_dir = Path(args.input_dir) if args.input_dir else default_inputs[args.direction]
     image_paths = gather_image_paths(input_dir, extensions)

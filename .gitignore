@@ -1,72 +1,66 @@
-/.venv
-/data
-/results
-/cityscapes_1k
-#/experiments
-epoch_*.pt
-best.pt
-latest.pt
-#!epoch_0200.pt
-/tmp
-core.*
-Video\ Bilder.zip
-exports
-
-
-
-
-# Byte-compiled Python files
-__pycache__/
-*.py[cod]
-*.pyo
-
-# Jupyter Notebook checkpoints
-.ipynb_checkpoints/
-
-# Environment and dependency files
+# Virtual environments and local environment files
+/.venv/
+/semgan310/
 .env
 *.env
 
-# Logs and debug files
+# Datasets, model weights, and external source trees
+/data/*
+!/data/README.md
+/checkpoints/*
+!/checkpoints/README.md
+/third_party/
+*.pt
+*.pth
+*.ckpt
+
+# Runtime outputs
+/experiments/
+/results/
+/exports/
+/fid_exp/
+/tmp/
+core.*
 *.log
 *.out
 *.err
-
-# System files
-.DS_Store
-Thumbs.db
-
-# Temporary files
-*.tmp
-*.swp
-*.swo
-*.bak
-
-# IDE-specific files
-.vscode/
-.idea/
-
-# Docker-related files
 *.pid
-docker-compose.override.yml
 
-# Build artifacts
+# Keep exactly the two public training configurations
+/configs/*
+!/configs/segmentation.yaml
+!/configs/semgan.yaml
+
+# Python caches and build artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
 build/
 dist/
 *.egg-info/
 *.egg
 
-# my files
-daynight.pdf
-verbesserung.txt
-structure.md
-cs2acdc_latest.pth
-
-/third_party
-semgan310
-/thesis
-
-/configs/*
+# Notebook and editor artifacts
+.ipynb_checkpoints/
 /notebooks/thesis_exp/
-fid_exp
-Masterarbeit (6).pdf
+*.tmp
+*.swp
+*.swo
+*.bak
+.vscode/
+.idea/
+
+# Local research and operating-system files
+/thesis/
+*.pdf
+cookies.txt
+WhatIDo.txt
+verbesserungen.txt
+structure.md
+acdc_pretrained.json
+.DS_Store
+Thumbs.db
+docker-compose.override.yml

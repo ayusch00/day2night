@@ -1,15 +1,45 @@
-import yaml, torch, random, numpy as np, os, time
+import os
+import random
+import time
 from pathlib import Path
 
-def load_cfg(path): return yaml.safe_load(open(path))
+import numpy as np
+import torch
+import yaml
+
+
+def load_cfg(path, section=None):
+    """Load a YAML config and optionally select a named top-level section."""
+    with open(path, encoding="utf-8") as fh:
+        cfg = yaml.safe_load(fh)
+    if not isinstance(cfg, dict):
+        raise ValueError(f"Config must contain a YAML mapping: {path}")
+    if section is None:
+        return cfg
+    if section not in cfg:
+        raise KeyError(
+            f"Config is missing required top-level section '{section}': {path}"
+        )
+    selected = cfg[section]
+    if not isinstance(selected, dict):
+        raise ValueError(f"Config section '{section}' must be a mapping: {path}")
+    return selected
+
+
 def set_seed(s):
-    random.seed(s); np.random.seed(s); torch.manual_seed(s); torch.cuda.manual_seed_all(s)
+    random.seed(s)
+    np.random.seed(s)
+    torch.manual_seed(s)
+    torch.cuda.manual_seed_all(s)
+
+
 def make_run_dirs(cfg):
     ts = time.strftime("%Y%m%d_%H%M%S")
     run = f"{cfg['exp_name']}_{ts}"
     exp_dir = os.path.join(cfg["logging"]["out_dir"], run)
     res_dir = cfg["logging"]["results_dir"]
-    os.makedirs(exp_dir, exist_ok=True); os.makedirs(res_dir, exist_ok=True)
+    os.makedirs(exp_dir, exist_ok=True)
+    os.makedirs(res_dir, exist_ok=True)
     return exp_dir, res_dir
 
 def resolve_encoder_checkpoint(

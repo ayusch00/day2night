@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the master's thesis below."
+type: software
+title: "Image-to-Image Translation für die Datenaugmentierung von Fahrszenen unter verschiedenen Wetterbedingungen"
+authors:
+  - family-names: Khajuria
+    given-names: Ayusch
+license: MIT
+repository-code: "https://github.com/ayusch00/day2night"
+preferred-citation:
+  type: thesis
+  title: "Image-to-Image Translation für die Datenaugmentierung von Fahrszenen unter verschiedenen Wetterbedingungen"
+  authors:
+    - family-names: Khajuria
+      given-names: Ayusch
+  institution:
+    name: "Technische Universität Berlin"
+  thesis-type: "Master's thesis"
+  year: 2026

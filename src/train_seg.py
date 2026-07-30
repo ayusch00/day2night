@@ -93,7 +93,7 @@ def evaluate(model, loader, device, num_classes, ignore_index, distributed):
     pix_acc = inter.sum().item() / conf.sum().clamp_min(1.0).item()
     return miou, pix_acc
 
-def main(cfg_path="configs/seg.yaml"):
+def main(cfg_path="configs/segmentation.yaml"):
     cfg = load_cfg(cfg_path)
     cfg_path = os.path.abspath(cfg_path)
     distributed, local_rank = init_distributed()
@@ -388,6 +388,6 @@ def main(cfg_path="configs/seg.yaml"):
 if __name__ == "__main__":
     import argparse
     p = argparse.ArgumentParser()
-    p.add_argument("--config", "-c", default="configs/seg.yaml")
+    p.add_argument("--config", "-c", default="configs/segmentation.yaml")
     args = p.parse_args()
     main(args.config)

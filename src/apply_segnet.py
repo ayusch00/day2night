@@ -42,7 +42,10 @@ CITYSCAPES_CLASSES: list[tuple[str, tuple[int, int, int]]] = [
 
 
 def build_inference_transform(cfg: dict | None) -> transforms.Compose:
-    tf_cfg = cfg.get("transforms", {}) if cfg else {}
+    if cfg:
+        tf_cfg = cfg.get("inference", {}).get("transforms", cfg.get("transforms", {}))
+    else:
+        tf_cfg = {}
     resize = tf_cfg.get("resize")
     crop = tf_cfg.get("crop")
     ops: list = []
@@ -120,7 +123,7 @@ def infer_model_channels(state_dict: dict) -> tuple[int, int]:
 
 def load_segnet(checkpoint: Path, device: torch.device, cfg: dict | None) -> SegNet9ResUNet:
     print(f"Loading checkpoint: {checkpoint}")
-    state = torch.load(checkpoint, map_location="cpu")
+    state = torch.load(checkpoint, map_location="cpu", weights_only=True)
     if isinstance(state, dict) and "model" in state:
         state = state["model"]
     num_classes, base_channels = infer_model_channels(state)
@@ -292,7 +295,7 @@ def process_images(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run SegNet inference on a handful of images.")
-    parser.add_argument("--config", "-c", default="configs/seg.yaml", help="Config file (for transforms).")
+    parser.add_argument("--config", "-c", default="configs/segmentation.yaml", help="Config file (for transforms).")
     parser.add_argument("--checkpoint", "-k", help="Path to segnet_full.pth (defaults to latest experiments/seg_*/).")
     parser.add_argument("--input-dir", "-i", required=True, help="Directory with input images.")
     parser.add_argument("--output-dir", "-o", default="results/segnet_notebook", help="Base output directory.")
